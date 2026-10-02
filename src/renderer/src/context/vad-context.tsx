@@ -112,11 +112,13 @@ export function VADProvider({ children }: { children: React.ReactNode }) {
 
   // Persistent state management
   const [micOn, setMicOn] = useLocalStorage('micOn', DEFAULT_VAD_STATE.micOn);
-  const autoStopMicRef = useRef(true);
   const [autoStopMic, setAutoStopMicState] = useLocalStorage(
     'autoStopMic',
     DEFAULT_VAD_STATE.autoStopMic,
   );
+  // Start from the stored value. It used to start at `true`, so the mic was
+  // switched off on a reply whatever had been saved.
+  const autoStopMicRef = useRef(autoStopMic);
   const [settings, setSettings] = useLocalStorage<VADSettings>(
     'vadSettings',
     DEFAULT_VAD_SETTINGS,
@@ -125,12 +127,12 @@ export function VADProvider({ children }: { children: React.ReactNode }) {
     'autoStartMicOn',
     DEFAULT_VAD_STATE.autoStartMicOn,
   );
-  const autoStartMicRef = useRef(false);
+  const autoStartMicRef = useRef(autoStartMicOn);
   const [autoStartMicOnConvEnd, setAutoStartMicOnConvEndState] = useLocalStorage(
     'autoStartMicOnConvEnd',
     DEFAULT_VAD_STATE.autoStartMicOnConvEnd,
   );
-  const autoStartMicOnConvEndRef = useRef(false);
+  const autoStartMicOnConvEndRef = useRef(autoStartMicOnConvEnd);
 
   // Force update mechanism for ref updates
   const [, forceUpdate] = useReducer((x) => x + 1, 0);
@@ -173,15 +175,15 @@ export function VADProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     autoStopMicRef.current = autoStopMic;
-  }, []);
+  }, [autoStopMic]);
 
   useEffect(() => {
     autoStartMicRef.current = autoStartMicOn;
-  }, []);
+  }, [autoStartMicOn]);
 
   useEffect(() => {
     autoStartMicOnConvEndRef.current = autoStartMicOnConvEnd;
-  }, []);
+  }, [autoStartMicOnConvEnd]);
 
   /**
    * Update previous triggered probability and force re-render
@@ -272,10 +274,19 @@ export function VADProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
+  // Starting the mic is slow (the model loads first). Two starts that overlap
+  // used to build two VADs, keep one in vadRef and leave the other listening
+  // after the mic was switched off - the icon red and the mic still live.
+  // Overlapping starts now share one build, and a stop bumps the generation
+  // so a build that finishes after it is destroyed instead of started.
+  const initPromiseRef = useRef<Promise<boolean> | null>(null);
+  const micGenerationRef = useRef(0);
+
   /**
-   * Initialize new VAD instance
+   * Initialize new VAD instance; false when a stop arrived while it was built
    */
-  const initVAD = async () => {
+  const initVAD = async (): Promise<boolean> => {
+    const generation = micGenerationRef.current;
     const newVAD = await MicVAD.new({
       model: "v5",
       preSpeechPadFrames: 20,
@@ -291,8 +302,13 @@ export function VADProvider({ children }: { children: React.ReactNode }) {
       onVADMisfire: handleVADMisfire,
     });
 
+    if (generation !== micGenerationRef.current || vadRef.current) {
+      newVAD.destroy();
+      return false;
+    }
     vadRef.current = newVAD;
     newVAD.start();
+    return true;
   };
 
   /**
@@ -300,9 +316,20 @@ export function VADProvider({ children }: { children: React.ReactNode }) {
    */
   const startMic = useCallback(async () => {
     try {
+      const callGeneration = micGenerationRef.current;
       if (!vadRef.current) {
-        console.log('Initializing VAD');
-        await initVAD();
+        while (!vadRef.current) {
+          if (!initPromiseRef.current) {
+            console.log('Initializing VAD');
+            initPromiseRef.current = initVAD().finally(() => {
+              initPromiseRef.current = null;
+            });
+          }
+          if (await initPromiseRef.current) break;
+          // A build this start shared was cancelled. If the stop came after
+          // this start was asked for, the stop wins; otherwise build again.
+          if (micGenerationRef.current !== callGeneration) return;
+        }
       } else {
         console.log('Starting VAD');
         vadRef.current.start();
@@ -323,6 +350,7 @@ export function VADProvider({ children }: { children: React.ReactNode }) {
    */
   const stopMic = useCallback(() => {
     console.log('Stopping VAD');
+    micGenerationRef.current += 1;
     if (vadRef.current) {
       vadRef.current.pause();
       vadRef.current.destroy();
@@ -357,10 +385,12 @@ export function VADProvider({ children }: { children: React.ReactNode }) {
     forceUpdate();
   }, []);
 
-  // Memoized context value
+  // Memoized context value. The three switches are published from state, not
+  // read from their refs: a ref read with the ref outside the dependencies
+  // handed the settings panel a stale `true`, and its Cancel saved it back.
   const contextValue = useMemo(
     () => ({
-      autoStopMic: autoStopMicRef.current,
+      autoStopMic,
       micOn,
       setMicOn,
       setAutoStopMic,
@@ -370,12 +400,15 @@ export function VADProvider({ children }: { children: React.ReactNode }) {
       setPreviousTriggeredProbability,
       settings,
       updateSettings,
-      autoStartMicOn: autoStartMicRef.current,
+      autoStartMicOn,
       setAutoStartMicOn,
-      autoStartMicOnConvEnd: autoStartMicOnConvEndRef.current,
+      autoStartMicOnConvEnd,
       setAutoStartMicOnConvEnd,
     }),
     [
+      autoStopMic,
+      autoStartMicOn,
+      autoStartMicOnConvEnd,
       micOn,
       startMic,
       stopMic,

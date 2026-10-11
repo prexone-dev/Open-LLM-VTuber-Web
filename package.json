@@ -22,7 +22,8 @@
     "build:linux": "electron-vite build && electron-builder --linux",
     "dev:web": "vite serve src/renderer --config vite.config.ts",
     "build:web": "vite build --config vite.config.ts --mode web",
-    "extract-translations": "i18next-scanner --config i18next-scanner.config.js"
+    "extract-translations": "i18next-scanner --config i18next-scanner.config.js",
+    "test:virgil": "node --experimental-strip-types --no-warnings --test \"tests/virgil/*.test.mts\""
   },
   "dependencies": {
     "@chakra-ui/react": "^3.2.3",
@@ -47,6 +48,8 @@
     "react-i18next": "^15.5.1",
     "react-icons": "^5.4.0",
     "rxjs": "^7.8.1",
+    "three": "0.170.0",
+    "urdf-loader": "0.13.1",
     "zustand": "^5.0.3"
   },
   "devDependencies": {
@@ -56,6 +59,7 @@
     "@types/node": "^20.14.8",
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
+    "@types/three": "0.170.0",
     "@vitejs/plugin-react": "^4.3.1",
     "@vitejs/plugin-react-swc": "^3.7.2",
     "electron": "^31.0.2",

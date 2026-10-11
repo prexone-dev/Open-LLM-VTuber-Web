@@ -6,6 +6,9 @@ import { ModelInfo } from '@/context/live2d-config-context';
 import { HistoryInfo } from '@/context/websocket-context';
 import { ConfigFile } from '@/context/character-config-context';
 import { toaster } from '@/components/ui/toaster';
+import {
+  ConnectionKeeper, serverReady, SocketLike, SocketState,
+} from '@/services/reconnect';
 
 export interface DisplayText {
   text: string;
@@ -105,16 +108,29 @@ const getTranslation = () => {
   }
 };
 
+type WsState = SocketState;
+
 class WebSocketService {
   private static instance: WebSocketService;
 
-  private ws: WebSocket | null = null;
-
   private messageSubject = new Subject<MessageEvent>();
 
-  private stateSubject = new Subject<'CONNECTING' | 'OPEN' | 'CLOSING' | 'CLOSED'>();
+  private stateSubject = new Subject<WsState>();
 
-  private currentState: 'CONNECTING' | 'OPEN' | 'CLOSING' | 'CLOSED' = 'CLOSED';
+  /**
+   * The page keeps its own connection (Virgil, OLV7-31): it waits for the
+   * server to be ready, and tries again on its own whenever the server is not
+   * there or goes away - nobody has to click "reconnect".
+   */
+  private keeper = new ConnectionKeeper({
+    createSocket: (url) => new WebSocket(url) as unknown as SocketLike,
+    ready: (url) => serverReady(url),
+    setTimer: (fn, ms) => setTimeout(fn, ms),
+    clearTimer: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
+    onState: (state) => this.stateSubject.next(state),
+    onOpen: () => this.initializeConnection(),
+    onData: (data) => this.receive(data),
+  });
 
   static getInstance() {
     if (!WebSocketService.instance) {
@@ -138,56 +154,34 @@ class WebSocketService {
     });
   }
 
-  connect(url: string) {
-    if (this.ws?.readyState === WebSocket.CONNECTING ||
-        this.ws?.readyState === WebSocket.OPEN) {
-      this.disconnect();
-    }
-
+  private receive(data: unknown) {
     try {
-      this.ws = new WebSocket(url);
-      this.currentState = 'CONNECTING';
-      this.stateSubject.next('CONNECTING');
-
-      this.ws.onopen = () => {
-        this.currentState = 'OPEN';
-        this.stateSubject.next('OPEN');
-        this.initializeConnection();
-      };
-
-      this.ws.onmessage = (event) => {
-        try {
-          const message = JSON.parse(event.data);
-          this.messageSubject.next(message);
-        } catch (error) {
-          console.error('Failed to parse WebSocket message:', error);
-          toaster.create({
-            title: `${getTranslation()('error.failedParseWebSocket')}: ${error}`,
-            type: "error",
-            duration: 2000,
-          });
-        }
-      };
-
-      this.ws.onclose = () => {
-        this.currentState = 'CLOSED';
-        this.stateSubject.next('CLOSED');
-      };
-
-      this.ws.onerror = () => {
-        this.currentState = 'CLOSED';
-        this.stateSubject.next('CLOSED');
-      };
+      const message = JSON.parse(data as string);
+      this.messageSubject.next(message);
     } catch (error) {
-      console.error('Failed to connect to WebSocket:', error);
-      this.currentState = 'CLOSED';
-      this.stateSubject.next('CLOSED');
+      console.error('Failed to parse WebSocket message:', error);
+      toaster.create({
+        title: `${getTranslation()('error.failedParseWebSocket')}: ${error}`,
+        type: "error",
+        duration: 2000,
+      });
     }
   }
 
+  connect(url: string) {
+    this.keeper.connect(url);
+  }
+
+  /** Leave this session and try again shortly: it came up without what the page needs. */
+  reconnectSoon(reason: string) {
+    console.warn(`Reconnecting: ${reason}`);
+    this.keeper.reconnectSoon();
+  }
+
   sendMessage(message: object) {
-    if (this.ws?.readyState === WebSocket.OPEN) {
-      this.ws.send(JSON.stringify(message));
+    const socket = this.keeper.openSocket;
+    if (socket && socket.readyState === WebSocket.OPEN) {
+      socket.send(JSON.stringify(message));
     } else {
       console.warn('WebSocket is not open. Unable to send message:', message);
       toaster.create({
@@ -202,17 +196,20 @@ class WebSocketService {
     return this.messageSubject.subscribe(callback);
   }
 
-  onStateChange(callback: (state: 'CONNECTING' | 'OPEN' | 'CLOSING' | 'CLOSED') => void) {
+  onStateChange(callback: (state: WsState) => void) {
+    // A subscriber that arrives after the first try started still learns
+    // where things stand, rather than showing "closed" until something changes.
+    callback(this.keeper.current);
     return this.stateSubject.subscribe(callback);
   }
 
+  /** Close on purpose: nothing retries until connect() is called again. */
   disconnect() {
-    this.ws?.close();
-    this.ws = null;
+    this.keeper.disconnect();
   }
 
   getCurrentState() {
-    return this.currentState;
+    return this.keeper.current;
   }
 }
 

@@ -1,7 +1,9 @@
 /* eslint-disable no-shadow */
 // import { StrictMode } from 'react';
 import { Box, Flex, ChakraProvider, defaultSystem } from "@chakra-ui/react";
-import { useState, useEffect, useRef } from "react";
+import {
+  useState, useEffect, useRef, lazy, Suspense,
+} from "react";
 // import Canvas from './components/canvas/canvas'; // Likely unused now
 import Sidebar from "./components/sidebar/sidebar";
 import Footer from "./components/footer/footer";
@@ -29,6 +31,12 @@ import Background from "./components/canvas/background";
 import WebSocketStatus from "./components/canvas/ws-status";
 import Subtitle from "./components/canvas/subtitle";
 import { ModeProvider, useMode } from "./context/mode-context";
+import { useWebSocket } from "./context/websocket-context";
+import { useReachyMode } from "./components/reachy/use-reachy-mode";
+
+// Loaded only when the robot is shown: three.js stays out of the avatar's page.
+const ReachyView = lazy(() => import("./components/reachy/reachy-view")
+  .then((m) => ({ default: m.ReachyView })));
 
 function AppContent(): JSX.Element {
   const [showSidebar, setShowSidebar] = useState(true);
@@ -36,6 +44,11 @@ function AppContent(): JSX.Element {
   const { mode } = useMode();
   const isElectron = window.api !== undefined;
   const live2dContainerRef = useRef<HTMLDivElement>(null);
+  const { baseUrl } = useWebSocket();
+  // Virgil (OLV7-32): the Reachy in the avatar's place, when the setting says so
+  // and a robot answers. The avatar stays mounted underneath, hidden: it is
+  // what plays the voice, and it is back at once when the robot goes.
+  const showReachy = useReachyMode(baseUrl);
 
   useEffect(() => {
     const handleResize = () => {
@@ -101,7 +114,20 @@ function AppContent(): JSX.Element {
           ? getResponsiveLive2DWindowStyle(showSidebar)
           : live2dPetStyle)}
       >
-        <Live2D />
+        <div
+          style={{
+            width: "100%",
+            height: "100%",
+            visibility: showReachy ? "hidden" : "visible",
+          }}
+        >
+          <Live2D />
+        </div>
+        {showReachy && (
+          <Suspense fallback={null}>
+            <ReachyView baseUrl={baseUrl} />
+          </Suspense>
+        )}
       </Box>
 
       {/* Conditional Rendering of Window UI */}

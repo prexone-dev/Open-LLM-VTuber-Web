@@ -21,6 +21,10 @@ import { useLocalStorage } from '@/hooks/utils/use-local-storage';
 import { useGroup } from '@/context/group-context';
 import { useInterrupt } from '@/hooks/utils/use-interrupt';
 import { useBrowser } from '@/context/browser-context';
+import { lacksModel } from '@/services/reconnect';
+
+/** How many sessions in a row may come up without a model before the page stops leaving them. */
+const MAX_MODEL_RETRIES = 3;
 
 function WebSocketHandler({ children }: { children: React.ReactNode }) {
   const { t } = useTranslation();
@@ -40,6 +44,7 @@ function WebSocketHandler({ children }: { children: React.ReactNode }) {
   const autoStartMicOnConvEndRef = useRef(autoStartMicOnConvEnd);
   const { interrupt } = useInterrupt();
   const { setBrowserViewData } = useBrowser();
+  const modelRetriesRef = useRef(0);
 
   useEffect(() => {
     autoStartMicOnConvEndRef.current = autoStartMicOnConvEnd;
@@ -100,6 +105,18 @@ function WebSocketHandler({ children }: { children: React.ReactNode }) {
         }
         break;
       case 'set-model-and-conf':
+        // A session with no model to draw is the blank page of 2026-10-08
+        // (OLV7-31): leave it and try again, a few times, rather than sit
+        // blank. A server that never has one is left alone after that.
+        if (lacksModel(message.model_info)) {
+          if (modelRetriesRef.current < MAX_MODEL_RETRIES) {
+            modelRetriesRef.current += 1;
+            wsService.reconnectSoon('the server sent no model yet');
+            break;
+          }
+        } else {
+          modelRetriesRef.current = 0;
+        }
         setAiState('loading');
         if (message.conf_name) {
           setConfName(message.conf_name);

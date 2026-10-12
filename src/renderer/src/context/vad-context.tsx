@@ -1,6 +1,6 @@
 /* eslint-disable no-use-before-define */
 import {
-  createContext, useContext, useRef, useCallback, useEffect, useReducer, useMemo,
+  createContext, useContext, useRef, useCallback, useEffect, useReducer, useMemo, useState,
 } from 'react';
 import { useTranslation } from 'react-i18next';
 import { MicVAD } from '@ricky0123/vad-web';
@@ -11,6 +11,9 @@ import { SubtitleContext } from './subtitle-context';
 import { AiStateContext, AiState } from './ai-state-context';
 import { useLocalStorage } from '@/hooks/utils/use-local-storage';
 import { toaster } from '@/components/ui/toaster';
+import {
+  LoudnessTracker, atRealStart, atSpeechEnd, grewLoudEnough, VOICE_THRESHOLD_OFF,
+} from '@/services/voice-gate';
 
 /**
  * VAD settings configuration interface
@@ -25,6 +28,13 @@ export interface VADSettings {
 
   /** Number of frames for speech redemption */
   redemptionFrames: number;
+
+  /**
+   * Voice threshold in dB (Virgil): while Virgil is talking, speech quieter than this is
+   * its own voice coming back and is not heard. VOICE_THRESHOLD_OFF (-70) is off.
+   * Optional so settings saved before it existed still load.
+   */
+  voiceThresholdDb?: number;
 }
 
 /**
@@ -73,6 +83,9 @@ interface VADState {
 
   /** Set auto start microphone when conversation ends state */
   setAutoStartMicOnConvEnd: (value: boolean) => void;
+
+  /** How loud the last thing the mic heard was, in dB, to set the voice threshold by */
+  lastHeardDb: number | null;
 }
 
 /**
@@ -82,6 +95,7 @@ const DEFAULT_VAD_SETTINGS: VADSettings = {
   positiveSpeechThreshold: 50,
   negativeSpeechThreshold: 35,
   redemptionFrames: 35,
+  voiceThresholdDb: VOICE_THRESHOLD_OFF,
 };
 
 const DEFAULT_VAD_STATE = {
@@ -152,6 +166,17 @@ export function VADProvider({ children }: { children: React.ReactNode }) {
 
   const isProcessingRef = useRef(false);
 
+  // The voice threshold (Virgil): how loud the speech so far is, whether it was held
+  // back as Virgil's own voice, and the setting, read through a ref because these
+  // callbacks are made once.
+  const loudnessRef = useRef(new LoudnessTracker());
+  const heldBackRef = useRef(false);
+  const settingsRef = useRef(settings);
+  const [lastHeardDb, setLastHeardDb] = useState<number | null>(null);
+  useEffect(() => {
+    settingsRef.current = settings;
+  }, [settings]);
+
   // Update refs when dependencies change
   useEffect(() => {
     aiStateRef.current = aiState;
@@ -201,6 +226,8 @@ export function VADProvider({ children }: { children: React.ReactNode }) {
     // Save current AI state but DON'T change to listening yet
     previousAiStateRef.current = aiStateRef.current;
     isProcessingRef.current = true;
+    loudnessRef.current.reset();
+    heldBackRef.current = false;
     // Don't change state here - wait for onSpeechRealStart
   }, []);
 
@@ -209,8 +236,20 @@ export function VADProvider({ children }: { children: React.ReactNode }) {
    */
   const handleSpeechRealStart = useCallback(() => {
     console.log('Real speech confirmed - checking if need to interrupt');
+    // While Virgil talks, a sound below the voice threshold is its own voice coming back:
+    // it does not cut Virgil off (Virgil, 2026-10-12).
+    const decision = atRealStart(
+      previousAiStateRef.current === 'thinking-speaking',
+      loudnessRef.current.loudest,
+      settingsRef.current.voiceThresholdDb,
+    );
+    if (decision === 'hold') {
+      console.log('Below the voice threshold while Virgil talks - not interrupting');
+      heldBackRef.current = true;
+      return;
+    }
     // Check if we need to interrupt based on the PREVIOUS state (before speech started)
-    if (previousAiStateRef.current === 'thinking-speaking') {
+    if (decision === 'interrupt') {
       console.log('Interrupting AI speech due to user speaking');
       interruptRef.current();
     }
@@ -221,7 +260,22 @@ export function VADProvider({ children }: { children: React.ReactNode }) {
   /**
    * Handle frame processing event
    */
-  const handleFrameProcessed = useCallback((probs: { isSpeech: number }) => {
+  const handleFrameProcessed = useCallback((probs: { isSpeech: number }, frame?: Float32Array) => {
+    if (isProcessingRef.current && frame) {
+      loudnessRef.current.add(frame);
+      // Held back as an echo but now loud enough to be him: cut Virgil off at once, not
+      // when the sentence ends (architecture review, 2026-10-12).
+      if (grewLoudEnough(
+        heldBackRef.current,
+        loudnessRef.current.loudest,
+        settingsRef.current.voiceThresholdDb,
+      )) {
+        heldBackRef.current = false;
+        console.log('Loud enough to be him - interrupting');
+        interruptRef.current();
+        setAiStateRef.current('listening');
+      }
+    }
     if (probs.isSpeech > previousTriggeredProbabilityRef.current) {
       setPreviousTriggeredProbability(probs.isSpeech);
     }
@@ -233,6 +287,19 @@ export function VADProvider({ children }: { children: React.ReactNode }) {
   const handleSpeechEnd = useCallback((audio: Float32Array) => {
     if (!isProcessingRef.current) return;
     console.log('Speech ended');
+    const loudest = Math.round(loudnessRef.current.loudest);
+    setLastHeardDb(loudest);
+    if (atSpeechEnd(
+      previousAiStateRef.current === 'thinking-speaking',
+      loudnessRef.current.loudest,
+      settingsRef.current.voiceThresholdDb,
+    ) === 'drop') {
+      // Virgil's own voice, by the voice threshold: never sent, never answered.
+      console.log(`Held back as Virgil's own voice: ${loudest} dB`);
+      setPreviousTriggeredProbability(0);
+      isProcessingRef.current = false;
+      return;
+    }
     audioTaskQueue.clearQueue();
 
     if (autoStopMicRef.current) {
@@ -404,6 +471,7 @@ export function VADProvider({ children }: { children: React.ReactNode }) {
       setAutoStartMicOn,
       autoStartMicOnConvEnd,
       setAutoStartMicOnConvEnd,
+      lastHeardDb,
     }),
     [
       autoStopMic,
@@ -414,6 +482,7 @@ export function VADProvider({ children }: { children: React.ReactNode }) {
       stopMic,
       settings,
       updateSettings,
+      lastHeardDb,
     ],
   );
 

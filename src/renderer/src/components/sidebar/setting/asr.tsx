@@ -6,6 +6,7 @@ import { useTranslation } from 'react-i18next';
 import { settingStyles } from './setting-styles';
 import { useASRSettings } from '@/hooks/sidebar/setting/use-asr-settings';
 import { SwitchField, NumberField } from './common';
+import { VOICE_THRESHOLD_OFF } from '@/services/voice-gate';
 
 interface ASRProps {
   onSave?: (callback: () => void) => () => void
@@ -25,6 +26,7 @@ function ASR({ onSave, onCancel }: ASRProps): JSX.Element {
     handleInputChange,
     handleSave,
     handleCancel,
+    lastHeardDb,
   } = useASRSettings();
 
   useEffect(() => {
@@ -57,6 +59,19 @@ function ASR({ onSave, onCancel }: ASRProps): JSX.Element {
         label={t('settings.asr.autoStartMicOn')}
         checked={autoStartMicOn}
         onChange={setAutoStartMicOn}
+      />
+
+      <NumberField
+        label={t('settings.asr.voiceThreshold')}
+        help={`${t('settings.asr.voiceThresholdDesc')} ${
+          lastHeardDb === null
+            ? t('settings.asr.voiceThresholdNothingHeard')
+            : t('settings.asr.voiceThresholdLastHeard', { db: lastHeardDb })
+        }`}
+        value={localSettings.voiceThresholdDb ?? VOICE_THRESHOLD_OFF}
+        onChange={(value) => handleInputChange('voiceThresholdDb', value)}
+        min={VOICE_THRESHOLD_OFF}
+        max={-5}
       />
 
       <NumberField

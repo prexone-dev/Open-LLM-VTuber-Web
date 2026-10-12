@@ -11,6 +11,7 @@ export const useASRSettings = () => {
     setAutoStartMicOn,
     autoStartMicOnConvEnd,
     setAutoStartMicOnConvEnd,
+    lastHeardDb,
   } = useVAD();
 
   const localSettingsRef = useRef<VADSettings>(settings);
@@ -58,6 +59,15 @@ export const useASRSettings = () => {
   };
 
   const handleSave = (): void => {
+    // A field emptied or half typed is saved as text; save it as its default instead, so
+    // no setting is ever stored as '' (architecture review, 2026-10-12).
+    const typed = localSettingsRef.current as unknown as Record<string, unknown>;
+    const saved = { ...originalSettingsRef.current } as unknown as Record<string, unknown>;
+    Object.keys(typed).forEach((key) => {
+      const value = typed[key];
+      if (typeof value === 'number' && Number.isFinite(value)) saved[key] = value;
+    });
+    localSettingsRef.current = saved as unknown as VADSettings;
     updateSettings(localSettingsRef.current);
     originalSettingsRef.current = localSettingsRef.current;
     originalAutoStopMicRef.current = localVoiceInterruption;
@@ -78,6 +88,7 @@ export const useASRSettings = () => {
 
   return {
     localSettings: localSettingsRef.current,
+    lastHeardDb,
     autoStopMic: localVoiceInterruption,
     autoStartMicOn: localAutoStartMic,
     autoStartMicOnConvEnd: localAutoStartMicOnConvEnd,

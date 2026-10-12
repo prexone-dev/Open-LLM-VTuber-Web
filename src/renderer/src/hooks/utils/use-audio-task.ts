@@ -8,6 +8,7 @@ import { useSubtitle } from '@/context/subtitle-context';
 import { useChatHistory } from '@/context/chat-history-context';
 import { audioTaskQueue } from '@/utils/task-queue';
 import { audioManager } from '@/utils/audio-manager';
+import { playOrHold, voiceUnlock } from '@/services/voice-unlock';
 import { toaster } from '@/components/ui/toaster';
 import { useWebSocket } from '@/context/websocket-context';
 import { DisplayText } from '@/services/websocket-service';
@@ -148,37 +149,33 @@ export const useAudioTask = () => {
 
         // Setup audio element
         const audio = new Audio(audioDataUrl);
-        
+
         // Register with global audio manager IMMEDIATELY after creating audio
         audioManager.setCurrentAudio(audio, model);
         let isFinished = false;
+        let started = false;
+        let heldToken: number | null = null;
 
         const cleanup = () => {
           audioManager.clearCurrentAudio(audio);
+          // A sentence held for his click and then stopped is let go here.
+          if (heldToken !== null) {
+            voiceUnlock.release(heldToken);
+            heldToken = null;
+          }
           if (!isFinished) {
             isFinished = true;
             resolve();
           }
         };
 
+        const stillWanted = () => stateRef.current.aiState !== 'interrupted'
+          && audioManager.hasCurrentAudio();
+
         // Enhance lip sync sensitivity
         const lipSyncScale = 2.0;
 
-        audio.addEventListener('canplaythrough', () => {
-          // Check for interruption before playback
-          if (stateRef.current.aiState === 'interrupted' || !audioManager.hasCurrentAudio()) {
-            console.warn('Audio playback cancelled due to interruption or audio was stopped');
-            cleanup();
-            return;
-          }
-
-          console.log('Starting audio playback with lip sync');
-          audio.play().catch((err) => {
-            console.error("Audio play error:", err);
-            cleanup();
-          });
-
-          // Setup lip sync
+        const startLipSync = () => {
           if (model._wavFileHandler) {
             if (!model._wavFileHandler._initialized) {
               console.log('Applying enhanced lip sync');
@@ -199,6 +196,41 @@ export const useAudioTask = () => {
               console.warn('WavFileHandler start skipped - audio was stopped');
             }
           }
+        };
+
+        audio.addEventListener('canplaythrough', () => {
+          // canplaythrough can fire more than once for one element.
+          if (started) return;
+          // Check for interruption before playback
+          if (!stillWanted()) {
+            console.warn('Audio playback cancelled due to interruption or audio was stopped');
+            cleanup();
+            return;
+          }
+          started = true;
+
+          console.log('Starting audio playback with lip sync');
+          // Virgil (OLV7-31): a browser that refuses to play until the page is
+          // clicked no longer loses the sentence - it is held, the page says
+          // so, and his click plays it (services/voice-unlock.ts).
+          playOrHold(() => audio.play(), voiceUnlock, {
+            onPlaying: () => {
+              heldToken = null;
+              startLipSync();
+            },
+            onHeld: (token) => { heldToken = token; },
+            stillWanted,
+            onDropped: cleanup,
+            onFailed: (err) => {
+              console.error("Audio play error:", err);
+              toaster.create({
+                title: `${t('error.audioPlayback')}: ${err}`,
+                type: "error",
+                duration: 4000,
+              });
+              cleanup();
+            },
+          });
         });
 
         audio.addEventListener('ended', () => {

@@ -29,6 +29,7 @@ import { BrowserProvider } from "./context/browser-context";
 import "@chatscope/chat-ui-kit-styles/dist/default/styles.min.css";
 import Background from "./components/canvas/background";
 import WebSocketStatus from "./components/canvas/ws-status";
+import VoiceUnlockBar from "./components/canvas/voice-unlock-bar";
 import Subtitle from "./components/canvas/subtitle";
 import { ModeProvider, useMode } from "./context/mode-context";
 import { useWebSocket } from "./context/websocket-context";
@@ -177,6 +178,9 @@ function AppContent(): JSX.Element {
 
       {/* Conditional Rendering of Pet Mode UI */}
       {mode === "pet" && <InputSubtitle />}
+
+      {/* Virgil (OLV7-31): the voice held for his click, in either mode */}
+      <VoiceUnlockBar />
     </>
   );
 }

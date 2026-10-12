@@ -22,6 +22,7 @@ import { useGroup } from '@/context/group-context';
 import { useInterrupt } from '@/hooks/utils/use-interrupt';
 import { useBrowser } from '@/context/browser-context';
 import { lacksModel } from '@/services/reconnect';
+import { pageLocation, usableFromHere } from '@/services/server-address';
 
 /** How many sessions in a row may come up without a model before the page stops leaving them. */
 const MAX_MODEL_RETRIES = 3;
@@ -29,8 +30,12 @@ const MAX_MODEL_RETRIES = 3;
 function WebSocketHandler({ children }: { children: React.ReactNode }) {
   const { t } = useTranslation();
   const [wsState, setWsState] = useState<string>('CLOSED');
-  const [wsUrl, setWsUrl] = useLocalStorage<string>('wsUrl', defaultWsUrl);
-  const [baseUrl, setBaseUrl] = useLocalStorage<string>('baseUrl', defaultBaseUrl);
+  const [savedWsUrl, setWsUrl] = useLocalStorage<string>('wsUrl', defaultWsUrl);
+  const [savedBaseUrl, setBaseUrl] = useLocalStorage<string>('baseUrl', defaultBaseUrl);
+  // A saved address for this computer's own server is no use from another computer
+  // (Virgil, OLV5-18): the page then talks back to wherever it came from.
+  const wsUrl = usableFromHere(savedWsUrl, defaultWsUrl, pageLocation());
+  const baseUrl = usableFromHere(savedBaseUrl, defaultBaseUrl, pageLocation());
   const { aiState, setAiState, backendSynthComplete, setBackendSynthComplete } = useAiState();
   const { setModelInfo } = useLive2DConfig();
   const { setSubtitleText } = useSubtitle();

@@ -2,9 +2,13 @@
 import React, { useContext, useCallback } from 'react';
 import { wsService } from '@/services/websocket-service';
 import { useLocalStorage } from '@/hooks/utils/use-local-storage';
+import { addressFor, pageLocation, usableFromHere } from '@/services/server-address';
 
-const DEFAULT_WS_URL = 'ws://127.0.0.1:12393/client-ws';
-const DEFAULT_BASE_URL = 'http://127.0.0.1:12393';
+// The server that served this page (Virgil, OLV5-18); upstream's 127.0.0.1:12393 only
+// for the desktop app and the development server.
+const HERE = addressFor(pageLocation(), import.meta.env.DEV);
+const DEFAULT_WS_URL = HERE.wsUrl;
+const DEFAULT_BASE_URL = HERE.baseUrl;
 
 export interface HistoryInfo {
   uid: string;
@@ -48,8 +52,10 @@ export const defaultWsUrl = DEFAULT_WS_URL;
 export const defaultBaseUrl = DEFAULT_BASE_URL;
 
 export function WebSocketProvider({ children }: { children: React.ReactNode }) {
-  const [wsUrl, setWsUrl] = useLocalStorage('wsUrl', DEFAULT_WS_URL);
-  const [baseUrl, setBaseUrl] = useLocalStorage('baseUrl', DEFAULT_BASE_URL);
+  const [savedWsUrl, setWsUrl] = useLocalStorage('wsUrl', DEFAULT_WS_URL);
+  const [savedBaseUrl, setBaseUrl] = useLocalStorage('baseUrl', DEFAULT_BASE_URL);
+  const wsUrl = usableFromHere(savedWsUrl, DEFAULT_WS_URL, pageLocation());
+  const baseUrl = usableFromHere(savedBaseUrl, DEFAULT_BASE_URL, pageLocation());
   const handleSetWsUrl = useCallback((url: string) => {
     setWsUrl(url);
     wsService.connect(url);

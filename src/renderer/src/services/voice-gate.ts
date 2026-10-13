@@ -5,8 +5,10 @@
 // is - so Virgil's own voice coming back from the speakers counts as speech exactly as his
 // does, and it interrupts itself and answers itself. Echo only exists while Virgil is
 // talking, so the threshold applies then: a sound has to be at least this loud to cut
-// Virgil off and be heard. When Virgil is quiet nothing is filtered, so a soft voice is
-// never lost. The level of everything heard is shown beside the setting to set it by.
+// Virgil off and be heard. Corrected the same evening: it applies all the time, because a
+// video or a call plays out of the same speakers while Virgil is quiet too; his voice up
+// close is louder than anything the speakers make. The level of everything heard is shown
+// beside the setting to set it by.
 //
 // The browser's own gain control is always on (the speech detector forces it), so levels
 // drift a little over time; the "last heard" reading is what to set it by.
@@ -84,13 +86,17 @@ export function grewLoudEnough(
   return held && loudEnough(loudestDb, thresholdDb);
 }
 
-/** When speech ends: send it, or drop it as Virgil's own voice. */
+/**
+ * When speech ends: send it, or drop it as sound from the speakers. Always, not only while
+ * Virgil talks - his correction, 2026-10-12: "the people that interrupted had the same volume
+ * or less than Virgil. They were all on the same speakers." A video playing while Virgil is
+ * quiet comes out of the same speakers, so his voice up close is the only loud thing.
+ */
 export function atSpeechEnd(
-  virgilSpeaking: boolean,
+  _virgilSpeaking: boolean,
   loudestDb: number,
   thresholdDb: unknown,
 ): 'send' | 'drop' {
-  if (!virgilSpeaking) return 'send';
   return loudEnough(loudestDb, thresholdDb) ? 'send' : 'drop';
 }
 

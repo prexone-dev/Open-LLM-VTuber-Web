@@ -14,6 +14,8 @@ import { toaster } from '@/components/ui/toaster';
 import {
   LoudnessTracker, atRealStart, atSpeechEnd, grewLoudEnough, levelDb, VOICE_THRESHOLD_OFF,
 } from '@/services/voice-gate';
+import { addressFor, pageLocation } from '@/services/server-address';
+import { joinedSamples, LEARN_SECONDS } from '@/services/voice-id';
 
 /**
  * VAD settings configuration interface
@@ -92,6 +94,34 @@ interface VADState {
    * beside the voice threshold (Virgil). Read on each animation frame; it never re-renders.
    */
   readLiveLevelDb: () => number | null;
+
+  /** Voice ID (Virgil): whether the server knows his voice, and how the last stretch matched. */
+  voiceId: VoiceIdState;
+
+  /** Use a voice threshold at once, before it is saved - the bar works live, as Discord's. */
+  previewVoiceThreshold: (db: number | undefined) => void;
+
+  /** Start learning his voice from the next stretches of speech. */
+  startLearningVoice: () => void;
+
+  /** Stop learning without saving. */
+  cancelLearningVoice: () => void;
+
+  /** The server's verdict on a stretch (from the connection handler). */
+  noteVoiceIdVerdict: (verdict: {
+    allowed: boolean; score: number | null; why: string; active?: boolean;
+  }) => void;
+}
+
+export interface VoiceIdState {
+  enabled: boolean;
+  model: boolean;
+  learned: boolean;
+  learning: boolean;
+  learnedSeconds: number;
+  message: string | null;
+  lastScore: number | null;
+  lastAllowed: boolean | null;
 }
 
 /**
@@ -179,6 +209,91 @@ export function VADProvider({ children }: { children: React.ReactNode }) {
   const heldBackRef = useRef(false);
   const settingsRef = useRef(settings);
   const [lastHeardDb, setLastHeardDb] = useState<number | null>(null);
+
+  // Voice ID (Virgil, 2026-10-12): the server says whether a stretch was his. While it
+  // knows his voice, the page never cuts Virgil off on its own - his voice, checked on the
+  // server, does that - so Virgil's own echo and other people cannot.
+  const [voiceId, setVoiceId] = useState<VoiceIdState>({
+    enabled: false,
+    model: false,
+    learned: false,
+    learning: false,
+    learnedSeconds: 0,
+    message: null,
+    lastScore: null,
+    lastAllowed: null,
+  });
+  const voiceIdActiveRef = useRef(false);
+  const learningRef = useRef<Float32Array[] | null>(null);
+  const serverBase = useMemo(() => addressFor(pageLocation(), import.meta.env.DEV).baseUrl, []);
+
+  const refreshVoiceId = useCallback(async () => {
+    try {
+      const reply = await fetch(`${serverBase}/api/voice-id`, { credentials: 'include' });
+      if (!reply.ok) return;
+      const status = await reply.json();
+      voiceIdActiveRef.current = Boolean(status.enabled && status.model && status.learned);
+      setVoiceId((prev) => ({
+        ...prev,
+        enabled: Boolean(status.enabled),
+        model: Boolean(status.model),
+        learned: Boolean(status.learned),
+      }));
+    } catch {
+      // An older server without voice ID: everything counts, as before.
+    }
+  }, [serverBase]);
+
+  useEffect(() => {
+    refreshVoiceId();
+  }, [refreshVoiceId]);
+
+  const previewVoiceThreshold = useCallback((db: number | undefined) => {
+    // Applied to the checks at once; saved (and kept) only by the settings' Save.
+    settingsRef.current = { ...settingsRef.current, voiceThresholdDb: db };
+  }, []);
+
+  const startLearningVoice = useCallback(() => {
+    learningRef.current = [];
+    setVoiceId((prev) => ({ ...prev, learning: true, learnedSeconds: 0, message: null }));
+  }, []);
+
+  const cancelLearningVoice = useCallback(() => {
+    learningRef.current = null;
+    setVoiceId((prev) => ({ ...prev, learning: false, learnedSeconds: 0 }));
+  }, []);
+
+  const finishLearningVoice = useCallback(async (stretches: Float32Array[]) => {
+    learningRef.current = null;
+    setVoiceId((prev) => ({ ...prev, learning: false, message: 'Learning your voice...' }));
+    try {
+      const reply = await fetch(`${serverBase}/api/voice-id/learn`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/octet-stream' },
+        body: joinedSamples(stretches).buffer as ArrayBuffer,
+      });
+      const result = await reply.json();
+      setVoiceId((prev) => ({
+        ...prev,
+        message: result.learned
+          ? `Learned. Only your voice counts now (your own lowest match ${result.lowest_match}).`
+          : (result.error || 'It could not learn your voice.'),
+      }));
+    } catch {
+      setVoiceId((prev) => ({ ...prev, message: 'It could not reach Virgil to learn your voice.' }));
+    }
+    refreshVoiceId();
+  }, [serverBase, refreshVoiceId]);
+
+  const noteVoiceIdVerdict = useCallback(
+    (verdict: { allowed: boolean; score: number | null; why: string; active?: boolean }) => {
+      // The server is the only judge of whether voice ID is on.
+      if (typeof verdict.active === 'boolean') voiceIdActiveRef.current = verdict.active;
+      setVoiceId((prev) => ({ ...prev, lastScore: verdict.score, lastAllowed: verdict.allowed }));
+    },
+    [],
+  );
   // Every frame's level, for the live meter (Virgil, 2026-10-12: "a reactive sound
   // threshold bar like discord has"). A ref, not state: frames arrive ~30 times a second.
   const liveLevelRef = useRef<{ db: number; at: number } | null>(null);
@@ -252,6 +367,11 @@ export function VADProvider({ children }: { children: React.ReactNode }) {
     console.log('Real speech confirmed - checking if need to interrupt');
     // While Virgil talks, a sound below the voice threshold is its own voice coming back:
     // it does not cut Virgil off (Virgil, 2026-10-12).
+    if (voiceIdActiveRef.current && previousAiStateRef.current === 'thinking-speaking') {
+      // Voice ID decides on the server whether this is him; Virgil keeps talking until then.
+      heldBackRef.current = true;
+      return;
+    }
     const decision = atRealStart(
       previousAiStateRef.current === 'thinking-speaking',
       loudnessRef.current.loudest,
@@ -280,7 +400,7 @@ export function VADProvider({ children }: { children: React.ReactNode }) {
       loudnessRef.current.add(frame);
       // Held back as an echo but now loud enough to be him: cut Virgil off at once, not
       // when the sentence ends (architecture review, 2026-10-12).
-      if (grewLoudEnough(
+      if (!voiceIdActiveRef.current && grewLoudEnough(
         heldBackRef.current,
         loudnessRef.current.loudest,
         settingsRef.current.voiceThresholdDb,
@@ -309,9 +429,31 @@ export function VADProvider({ children }: { children: React.ReactNode }) {
       loudnessRef.current.loudest,
       settingsRef.current.voiceThresholdDb,
     ) === 'drop') {
-      // Virgil's own voice, by the voice threshold: never sent, never answered.
-      console.log(`Held back as Virgil's own voice: ${loudest} dB`);
+      // Sound from the speakers, by the voice threshold: never sent, never answered. The
+      // page goes back to what it was doing (it may have shown 'listening').
+      console.log(`Held back as sound from the speakers: ${loudest} dB`);
       setPreviousTriggeredProbability(0);
+      isProcessingRef.current = false;
+      heldBackRef.current = false;
+      if (aiStateRef.current === 'listening') setAiStateRef.current(previousAiStateRef.current);
+      return;
+    }
+    if (learningRef.current && previousAiStateRef.current !== 'thinking-speaking') {
+      // Learning his voice: this stretch is for the voice print, not a turn - never while
+      // Virgil talks, or its own voice would be learned as his.
+      learningRef.current.push(audio);
+      const seconds = learningRef.current.reduce((n, a) => n + a.length, 0) / 16000;
+      setVoiceId((prev) => ({ ...prev, learnedSeconds: Math.round(seconds) }));
+      setPreviousTriggeredProbability(0);
+      isProcessingRef.current = false;
+      if (seconds >= LEARN_SECONDS) finishLearningVoice(learningRef.current);
+      return;
+    }
+    if (voiceIdActiveRef.current && previousAiStateRef.current === 'thinking-speaking') {
+      // Sent for the server to check; Virgil goes on unless it was him (the server then
+      // stops the reply and the page with it).
+      setPreviousTriggeredProbability(0);
+      sendAudioPartitionRef.current(audio);
       isProcessingRef.current = false;
       return;
     }
@@ -488,6 +630,11 @@ export function VADProvider({ children }: { children: React.ReactNode }) {
       setAutoStartMicOnConvEnd,
       lastHeardDb,
       readLiveLevelDb,
+      voiceId,
+      previewVoiceThreshold,
+      startLearningVoice,
+      cancelLearningVoice,
+      noteVoiceIdVerdict,
     }),
     [
       autoStopMic,
@@ -500,6 +647,11 @@ export function VADProvider({ children }: { children: React.ReactNode }) {
       updateSettings,
       lastHeardDb,
       readLiveLevelDb,
+      voiceId,
+      previewVoiceThreshold,
+      startLearningVoice,
+      cancelLearningVoice,
+      noteVoiceIdVerdict,
     ],
   );
 

@@ -52,6 +52,10 @@ export interface Actions {
 }
 
 export interface MessageEvent {
+  /** Voice ID's verdict on a stretch of speech (Virgil). */
+  allowed?: boolean;
+  score?: number | null;
+  why?: string;
   tool_id: any;
   tool_name: any;
   name: any;

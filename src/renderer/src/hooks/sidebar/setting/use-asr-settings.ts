@@ -14,6 +14,10 @@ export const useASRSettings = () => {
     lastHeardDb,
     readLiveLevelDb,
     micOn,
+    voiceId,
+    previewVoiceThreshold,
+    startLearningVoice,
+    cancelLearningVoice,
   } = useVAD();
 
   const localSettingsRef = useRef<VADSettings>(settings);
@@ -79,6 +83,8 @@ export const useASRSettings = () => {
 
   const handleCancel = (): void => {
     localSettingsRef.current = originalSettingsRef.current;
+    previewVoiceThreshold(originalSettingsRef.current.voiceThresholdDb);
+    cancelLearningVoice();
     setLocalVoiceInterruption(originalAutoStopMicRef.current);
     setLocalAutoStartMic(originalAutoStartMicOnRef.current);
     setAutoStopMic(originalAutoStopMicRef.current);
@@ -93,6 +99,10 @@ export const useASRSettings = () => {
     lastHeardDb,
     readLiveLevelDb,
     micOn,
+    voiceId,
+    previewVoiceThreshold,
+    startLearningVoice,
+    cancelLearningVoice,
     autoStopMic: localVoiceInterruption,
     autoStartMicOn: localAutoStartMic,
     autoStartMicOnConvEnd: localAutoStartMicOnConvEnd,

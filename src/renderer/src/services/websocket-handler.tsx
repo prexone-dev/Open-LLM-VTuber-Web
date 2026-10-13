@@ -45,7 +45,9 @@ function WebSocketHandler({ children }: { children: React.ReactNode }) {
   const { confUid, setConfName, setConfUid, setConfigFiles } = useConfig();
   const [pendingModelInfo, setPendingModelInfo] = useState<ModelInfo | undefined>(undefined);
   const { setSelfUid, setGroupMembers, setIsOwner } = useGroup();
-  const { startMic, stopMic, autoStartMicOnConvEnd } = useVAD();
+  const {
+    startMic, stopMic, autoStartMicOnConvEnd, noteVoiceIdVerdict,
+  } = useVAD();
   const autoStartMicOnConvEndRef = useRef(autoStartMicOnConvEnd);
   const { interrupt } = useInterrupt();
   const { setBrowserViewData } = useBrowser();
@@ -280,6 +282,17 @@ function WebSocketHandler({ children }: { children: React.ReactNode }) {
         break;
       case 'force-new-message':
         setForceNewMessage(true);
+        break;
+      case 'voice-id':
+        // Voice ID's verdict on a stretch (Virgil): shown in the speech settings.
+        noteVoiceIdVerdict({
+          allowed: Boolean(message.allowed),
+          score: typeof message.score === 'number' ? message.score : null,
+          why: String(message.why || ''),
+          active: typeof (message as { active?: boolean }).active === 'boolean'
+            ? (message as { active?: boolean }).active
+            : undefined,
+        });
         break;
       case 'interrupt-signal':
         // Handle forwarded interrupt

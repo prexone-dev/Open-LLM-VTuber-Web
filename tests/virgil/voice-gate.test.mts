@@ -52,9 +52,11 @@ test('speech that starts quiet and grows loud cuts Virgil off as soon as it is l
   assert.equal(grewLoudEnough(false, HIM, THRESHOLD), false);
 });
 
-test('when Virgil is quiet nothing is held back, however soft', () => {
+test('when Virgil is quiet the speakers are held back too, and he still gets through', () => {
+  // His correction, 2026-10-12: the other voices came out of the same speakers as Virgil.
   assert.equal(atRealStart(false, -80, -20), 'none');
-  assert.equal(atSpeechEnd(false, -80, -20), 'send');
+  assert.equal(atSpeechEnd(false, ECHO, THRESHOLD), 'drop');
+  assert.equal(atSpeechEnd(false, HIM, THRESHOLD), 'send');
 });
 
 test('off, not set, emptied or half typed holds nothing back', () => {

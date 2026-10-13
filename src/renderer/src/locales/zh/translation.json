@@ -46,9 +46,13 @@
       "redemptionFrames": "验证帧数",
       "redemptionFramesDesc": "确认语音检测所需的连续帧数(1-100)，数值越高越能减少噪音触发",
       "voiceThreshold": "Virgil 说话时的声音阈值 (dB)",
-      "voiceThresholdDesc": "Virgil 说话时，低于此音量的声音被视为它自己的回声，不会被听到。-70 为关闭。请设在你的声音和 Virgil 回声之间。",
+      "voiceThresholdDesc": "Virgil 说话时，低于此音量的声音被视为它自己的回声，不会被听到。-70 为关闭。看着音量条：把竖线拖到 Virgil 回声之上、你的声音之下，然后保存。",
       "voiceThresholdLastHeard": "上次听到：{{db}} dB。",
-      "voiceThresholdNothingHeard": "尚未听到声音——说话后再打开此处查看音量。"
+      "voiceThresholdNothingHeard": "尚未听到声音——说话后再打开此处查看音量。",
+      "voiceThresholdOff": "阈值：关闭——拖动竖线来设置",
+      "voiceThresholdAt": "阈值：{{db}} dB",
+      "voiceMeterNow": "当前麦克风：{{db}} dB",
+      "voiceMeterMicOff": "打开麦克风以查看音量"
     },
     "agent": {
       "allowProactiveSpeak": "允许AI主动发言",

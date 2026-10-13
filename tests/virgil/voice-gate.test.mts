@@ -64,3 +64,30 @@ test('off, not set, emptied or half typed holds nothing back', () => {
   }
   assert.equal(thresholdInForce(-30), -30);
 });
+
+test('the meter maps levels to the bar and back, clamped at both ends', async () => {
+  const { dbToFraction, fractionToDb, METER_MIN_DB } = await import(
+    '../../src/renderer/src/services/voice-gate.ts'
+  );
+  assert.equal(dbToFraction(METER_MIN_DB), 0);
+  assert.equal(dbToFraction(0), 1);
+  assert.equal(dbToFraction(-200), 0);
+  assert.equal(dbToFraction(10), 1);
+  assert.equal(dbToFraction(NaN), 0);
+  assert.equal(fractionToDb(0), METER_MIN_DB);
+  assert.equal(fractionToDb(0.5), -35);
+  assert.equal(fractionToDb(1), -5);
+  assert.equal(fractionToDb(dbToFraction(-30)), -30);
+});
+
+test('the meter rises at once and falls back gently, and shows nothing with the mic off', async () => {
+  const { meterStep, METER_FALL_DB_PER_FRAME } = await import(
+    '../../src/renderer/src/services/voice-gate.ts'
+  );
+  assert.equal(meterStep(-40, null), null);
+  assert.equal(meterStep(null, -40), -40);
+  assert.equal(meterStep(-40, -20), -20);
+  assert.equal(meterStep(-20, -60), -20 - METER_FALL_DB_PER_FRAME);
+  assert.equal(meterStep(-20, -20.5), -20.5);
+  assert.equal(meterStep(-30, -30), -30);
+});

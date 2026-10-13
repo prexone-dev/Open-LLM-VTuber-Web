@@ -12,7 +12,7 @@ import { AiStateContext, AiState } from './ai-state-context';
 import { useLocalStorage } from '@/hooks/utils/use-local-storage';
 import { toaster } from '@/components/ui/toaster';
 import {
-  LoudnessTracker, atRealStart, atSpeechEnd, grewLoudEnough, VOICE_THRESHOLD_OFF,
+  LoudnessTracker, atRealStart, atSpeechEnd, grewLoudEnough, levelDb, VOICE_THRESHOLD_OFF,
 } from '@/services/voice-gate';
 
 /**
@@ -86,6 +86,12 @@ interface VADState {
 
   /** How loud the last thing the mic heard was, in dB, to set the voice threshold by */
   lastHeardDb: number | null;
+
+  /**
+   * The mic's level right now, in dB, or null when the mic is off - for the live meter
+   * beside the voice threshold (Virgil). Read on each animation frame; it never re-renders.
+   */
+  readLiveLevelDb: () => number | null;
 }
 
 /**
@@ -173,6 +179,14 @@ export function VADProvider({ children }: { children: React.ReactNode }) {
   const heldBackRef = useRef(false);
   const settingsRef = useRef(settings);
   const [lastHeardDb, setLastHeardDb] = useState<number | null>(null);
+  // Every frame's level, for the live meter (Virgil, 2026-10-12: "a reactive sound
+  // threshold bar like discord has"). A ref, not state: frames arrive ~30 times a second.
+  const liveLevelRef = useRef<{ db: number; at: number } | null>(null);
+  const readLiveLevelDb = useCallback((): number | null => {
+    const live = liveLevelRef.current;
+    if (!live || performance.now() - live.at > 500) return null;
+    return live.db;
+  }, []);
   useEffect(() => {
     settingsRef.current = settings;
   }, [settings]);
@@ -261,6 +275,7 @@ export function VADProvider({ children }: { children: React.ReactNode }) {
    * Handle frame processing event
    */
   const handleFrameProcessed = useCallback((probs: { isSpeech: number }, frame?: Float32Array) => {
+    if (frame) liveLevelRef.current = { db: levelDb(frame), at: performance.now() };
     if (isProcessingRef.current && frame) {
       loudnessRef.current.add(frame);
       // Held back as an echo but now loud enough to be him: cut Virgil off at once, not
@@ -472,6 +487,7 @@ export function VADProvider({ children }: { children: React.ReactNode }) {
       autoStartMicOnConvEnd,
       setAutoStartMicOnConvEnd,
       lastHeardDb,
+      readLiveLevelDb,
     }),
     [
       autoStopMic,
@@ -483,6 +499,7 @@ export function VADProvider({ children }: { children: React.ReactNode }) {
       settings,
       updateSettings,
       lastHeardDb,
+      readLiveLevelDb,
     ],
   );
 

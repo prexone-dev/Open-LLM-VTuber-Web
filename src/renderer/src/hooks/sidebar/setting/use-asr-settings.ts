@@ -12,6 +12,8 @@ export const useASRSettings = () => {
     autoStartMicOnConvEnd,
     setAutoStartMicOnConvEnd,
     lastHeardDb,
+    readLiveLevelDb,
+    micOn,
   } = useVAD();
 
   const localSettingsRef = useRef<VADSettings>(settings);
@@ -89,6 +91,8 @@ export const useASRSettings = () => {
   return {
     localSettings: localSettingsRef.current,
     lastHeardDb,
+    readLiveLevelDb,
+    micOn,
     autoStopMic: localVoiceInterruption,
     autoStartMicOn: localAutoStartMic,
     autoStartMicOnConvEnd: localAutoStartMicOnConvEnd,

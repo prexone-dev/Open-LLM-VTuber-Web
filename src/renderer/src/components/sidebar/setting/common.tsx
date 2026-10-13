@@ -21,7 +21,7 @@ interface HelpIconProps {
   content: string;
 }
 
-function HelpIcon({ content }: HelpIconProps): JSX.Element {
+export function HelpIcon({ content }: HelpIconProps): JSX.Element {
   const [isHovering, setIsHovering] = useState(false);
 
   const handleMouseEnter = () => setIsHovering(true);

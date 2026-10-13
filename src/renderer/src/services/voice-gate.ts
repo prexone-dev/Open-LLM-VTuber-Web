@@ -93,3 +93,35 @@ export function atSpeechEnd(
   if (!virgilSpeaking) return 'send';
   return loudEnough(loudestDb, thresholdDb) ? 'send' : 'drop';
 }
+
+/** The meter's scale, like Discord's input sensitivity bar: quietest to loudest shown. */
+export const METER_MIN_DB = VOICE_THRESHOLD_OFF;
+export const METER_MAX_DB = 0;
+
+/** Where a level sits along the meter, 0 at the left to 1 at the right. */
+export function dbToFraction(db: number): number {
+  if (!Number.isFinite(db)) return 0;
+  const fraction = (db - METER_MIN_DB) / (METER_MAX_DB - METER_MIN_DB);
+  return Math.min(1, Math.max(0, fraction));
+}
+
+/** The threshold a point on the meter means, rounded to a whole dB, never above -5. */
+export function fractionToDb(fraction: number): number {
+  const clamped = Math.min(1, Math.max(0, Number.isFinite(fraction) ? fraction : 0));
+  const db = Math.round(METER_MIN_DB + clamped * (METER_MAX_DB - METER_MIN_DB));
+  return Math.min(-5, db);
+}
+
+/** How fast the meter falls back after a loud sound: dB per animation frame (~60 a second). */
+export const METER_FALL_DB_PER_FRAME = 1.2;
+
+/**
+ * One step of the meter: it rises to a louder level at once and falls back gently, as
+ * Discord's does; null (mic off) shows nothing. An unchanged level returns the same value,
+ * so the meter skips a render.
+ */
+export function meterStep(previous: number | null, level: number | null): number | null {
+  if (level === null) return null;
+  if (previous === null || level >= previous) return level;
+  return Math.max(level, previous - METER_FALL_DB_PER_FRAME);
+}

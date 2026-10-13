@@ -48,9 +48,13 @@
       "redemptionFrames": "Redemption Frames",
       "redemptionFramesDesc": "Number of consecutive frames (1-100) needed to confirm speech detection. Higher values reduce noise triggers",
       "voiceThreshold": "Voice Threshold While Virgil Talks (dB)",
-      "voiceThresholdDesc": "While Virgil is talking, sound quieter than this is taken as its own voice coming back and is not heard. -70 is off. Set it between your voice and Virgil's echo.",
+      "voiceThresholdDesc": "While Virgil is talking, sound quieter than this is taken as its own voice coming back and is not heard. -70 is off. Watch the bar: drag the line above Virgil's echo and below your voice, then save.",
       "voiceThresholdLastHeard": "Last heard: {{db}} dB.",
-      "voiceThresholdNothingHeard": "Nothing heard yet - speak, then open this again to see the level."
+      "voiceThresholdNothingHeard": "Nothing heard yet - speak, then open this again to see the level.",
+      "voiceThresholdOff": "Threshold: off - drag the line to set it",
+      "voiceThresholdAt": "Threshold: {{db}} dB",
+      "voiceMeterNow": "Mic now: {{db}} dB",
+      "voiceMeterMicOff": "Turn the mic on to see the level"
     },
     "agent": {
       "allowProactiveSpeak": "Allow AI to Speak Proactively",

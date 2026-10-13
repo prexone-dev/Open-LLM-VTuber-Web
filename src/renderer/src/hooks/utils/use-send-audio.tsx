@@ -28,7 +28,18 @@ export function useSendAudio() {
     [sendMessage, captureAllMedia],
   );
 
+  // The first moments of his speech while Virgil talks, for the server to check his voice
+  // early and stop Virgil at once (Virgil, 2026-10-13). Never a turn: the whole stretch
+  // still goes by sendAudioPartition when he stops.
+  const sendVoiceProbe = useCallback(
+    (audio: Float32Array) => {
+      sendMessage({ type: "voice-probe", audio: Array.from(audio) });
+    },
+    [sendMessage],
+  );
+
   return {
     sendAudioPartition,
+    sendVoiceProbe,
   };
 }

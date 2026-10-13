@@ -16,6 +16,7 @@ import {
 } from '@/services/voice-gate';
 import { addressFor, pageLocation } from '@/services/server-address';
 import { joinedSamples, LEARN_SECONDS } from '@/services/voice-id';
+import { VoiceProbe } from '@/services/voice-probe';
 
 /**
  * VAD settings configuration interface
@@ -109,7 +110,7 @@ interface VADState {
 
   /** The server's verdict on a stretch (from the connection handler). */
   noteVoiceIdVerdict: (verdict: {
-    allowed: boolean; score: number | null; why: string; active?: boolean;
+    allowed: boolean; score: number | null; why: string; active?: boolean; probe?: boolean;
   }) => void;
 }
 
@@ -189,13 +190,14 @@ export function VADProvider({ children }: { children: React.ReactNode }) {
 
   // External hooks and contexts
   const { interrupt } = useInterrupt();
-  const { sendAudioPartition } = useSendAudio();
+  const { sendAudioPartition, sendVoiceProbe } = useSendAudio();
   const { setSubtitleText } = useContext(SubtitleContext)!;
   const { aiState, setAiState } = useContext(AiStateContext)!;
 
   // Refs for callback stability
   const interruptRef = useRef(interrupt);
   const sendAudioPartitionRef = useRef(sendAudioPartition);
+  const sendVoiceProbeRef = useRef(sendVoiceProbe);
   const aiStateRef = useRef<AiState>(aiState);
   const setSubtitleTextRef = useRef(setSubtitleText);
   const setAiStateRef = useRef(setAiState);
@@ -224,6 +226,9 @@ export function VADProvider({ children }: { children: React.ReactNode }) {
     lastAllowed: null,
   });
   const voiceIdActiveRef = useRef(false);
+  // The early voice check (Virgil, 2026-10-13): the first moments of his speech while Virgil
+  // talks are sent on their own, so Virgil stops when he starts, not when he finishes.
+  const probeRef = useRef(new VoiceProbe());
   const learningRef = useRef<Float32Array[] | null>(null);
   const serverBase = useMemo(() => addressFor(pageLocation(), import.meta.env.DEV).baseUrl, []);
 
@@ -287,10 +292,21 @@ export function VADProvider({ children }: { children: React.ReactNode }) {
   }, [serverBase, refreshVoiceId]);
 
   const noteVoiceIdVerdict = useCallback(
-    (verdict: { allowed: boolean; score: number | null; why: string; active?: boolean }) => {
+    (verdict: {
+      allowed: boolean; score: number | null; why: string; active?: boolean; probe?: boolean;
+    }) => {
       // The server is the only judge of whether voice ID is on.
       if (typeof verdict.active === 'boolean') voiceIdActiveRef.current = verdict.active;
       setVoiceId((prev) => ({ ...prev, lastScore: verdict.score, lastAllowed: verdict.allowed }));
+      if (verdict.probe && probeRef.current.verdict(verdict.allowed)) {
+        // His voice, heard early: Virgil stops now - the server has already stopped the reply
+        // and said so; this also stops audio still queued after the reply finished sending.
+        // From here this stretch is his turn, exactly as when the page cut Virgil off itself.
+        console.log('Voice ID: his voice at the start of his speech - interrupting');
+        heldBackRef.current = false;
+        interruptRef.current(false);
+        if (isProcessingRef.current) setAiStateRef.current('listening');
+      }
     },
     [],
   );
@@ -318,6 +334,10 @@ export function VADProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     sendAudioPartitionRef.current = sendAudioPartition;
   }, [sendAudioPartition]);
+
+  useEffect(() => {
+    sendVoiceProbeRef.current = sendVoiceProbe;
+  }, [sendVoiceProbe]);
 
   useEffect(() => {
     setSubtitleTextRef.current = setSubtitleText;
@@ -357,6 +377,11 @@ export function VADProvider({ children }: { children: React.ReactNode }) {
     isProcessingRef.current = true;
     loudnessRef.current.reset();
     heldBackRef.current = false;
+    // Checked early only while voice ID decides and Virgil is talking; otherwise the page
+    // cuts Virgil off itself at the real start, as before.
+    probeRef.current.start(
+      voiceIdActiveRef.current && previousAiStateRef.current === 'thinking-speaking',
+    );
     // Don't change state here - wait for onSpeechRealStart
   }, []);
 
@@ -398,6 +423,15 @@ export function VADProvider({ children }: { children: React.ReactNode }) {
     if (frame) liveLevelRef.current = { db: levelDb(frame), at: performance.now() };
     if (isProcessingRef.current && frame) {
       loudnessRef.current.add(frame);
+      const probe = probeRef.current.add(frame, atSpeechEnd(
+        true,
+        loudnessRef.current.loudest,
+        settingsRef.current.voiceThresholdDb,
+      ) === 'send');
+      if (probe) {
+        console.log('Sending the start of his speech for an early voice check');
+        sendVoiceProbeRef.current(probe);
+      }
       // Held back as an echo but now loud enough to be him: cut Virgil off at once, not
       // when the sentence ends (architecture review, 2026-10-12).
       if (!voiceIdActiveRef.current && grewLoudEnough(
@@ -422,6 +456,7 @@ export function VADProvider({ children }: { children: React.ReactNode }) {
   const handleSpeechEnd = useCallback((audio: Float32Array) => {
     if (!isProcessingRef.current) return;
     console.log('Speech ended');
+    probeRef.current.stop();
     const loudest = Math.round(loudnessRef.current.loudest);
     setLastHeardDb(loudest);
     if (atSpeechEnd(
@@ -449,7 +484,11 @@ export function VADProvider({ children }: { children: React.ReactNode }) {
       if (seconds >= LEARN_SECONDS) finishLearningVoice(learningRef.current);
       return;
     }
-    if (voiceIdActiveRef.current && previousAiStateRef.current === 'thinking-speaking') {
+    if (
+      voiceIdActiveRef.current
+      && previousAiStateRef.current === 'thinking-speaking'
+      && !probeRef.current.confirmed
+    ) {
       // Sent for the server to check; Virgil goes on unless it was him (the server then
       // stops the reply and the page with it).
       setPreviousTriggeredProbability(0);
@@ -477,6 +516,7 @@ export function VADProvider({ children }: { children: React.ReactNode }) {
   const handleVADMisfire = useCallback(() => {
     if (!isProcessingRef.current) return;
     console.log('VAD misfire detected');
+    probeRef.current.stop();
     setPreviousTriggeredProbability(0);
     isProcessingRef.current = false;
 

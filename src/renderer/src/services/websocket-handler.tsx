@@ -292,6 +292,8 @@ function WebSocketHandler({ children }: { children: React.ReactNode }) {
           active: typeof (message as { active?: boolean }).active === 'boolean'
             ? (message as { active?: boolean }).active
             : undefined,
+          // The early check of the start of his speech (Virgil, 2026-10-13).
+          probe: Boolean((message as { probe?: boolean }).probe),
         });
         break;
       case 'interrupt-signal':

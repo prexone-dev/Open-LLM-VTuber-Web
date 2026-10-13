@@ -104,3 +104,15 @@ test('frames are copied - a detector that reuses its buffer does not change what
   }
   assert.equal(out![0], 1);
 });
+
+// Architecture review, 2026-10-13: the reply had finished generating and only the page still
+// played it, so the server stopped nothing - and the page interrupted without telling it, so
+// nobody recorded the cut and the memory kept the whole reply as heard.
+test('the page sends what he heard exactly when the server did not stop the reply', () => {
+  assert.equal(VoiceProbe.pageRecordsTheCut({ stopped: false }), true);
+  assert.equal(VoiceProbe.pageRecordsTheCut({ stopped: true }), false);
+});
+
+test('a server that does not say whether it stopped is taken to have stopped it', () => {
+  assert.equal(VoiceProbe.pageRecordsTheCut({}), false);
+});

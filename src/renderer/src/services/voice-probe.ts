@@ -87,6 +87,18 @@ export class VoiceProbe {
     return out;
   }
 
+  /**
+   * Whether the page, stopping Virgil on the early check, sends the server its own interrupt
+   * with what he heard. Exactly when the server did not already stop and record the reply
+   * (`stopped: false`): it had finished generating and only the page was still playing it, so
+   * nobody else records the cut and the memory would keep the whole reply as heard
+   * (architecture review, 2026-10-13). A server that does not say is taken to have stopped it,
+   * as before the field existed, so the cut is never recorded twice.
+   */
+  static pageRecordsTheCut(verdict: { stopped?: boolean }): boolean {
+    return verdict.stopped === false;
+  }
+
   /** The server's verdict on what was sent. True when the page should stop Virgil now. */
   verdict(allowed: boolean): boolean {
     if (!this.sent || this.confirmed || !allowed) return false;

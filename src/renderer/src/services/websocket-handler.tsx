@@ -294,6 +294,10 @@ function WebSocketHandler({ children }: { children: React.ReactNode }) {
             : undefined,
           // The early check of the start of his speech (Virgil, 2026-10-13).
           probe: Boolean((message as { probe?: boolean }).probe),
+          // Whether the server stopped and recorded a running reply (absent: it did).
+          stopped: typeof (message as { stopped?: boolean }).stopped === 'boolean'
+            ? (message as { stopped?: boolean }).stopped
+            : undefined,
         });
         break;
       case 'interrupt-signal':

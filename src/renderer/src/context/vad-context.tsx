@@ -111,6 +111,7 @@ interface VADState {
   /** The server's verdict on a stretch (from the connection handler). */
   noteVoiceIdVerdict: (verdict: {
     allowed: boolean; score: number | null; why: string; active?: boolean; probe?: boolean;
+    stopped?: boolean;
   }) => void;
 }
 
@@ -294,17 +295,19 @@ export function VADProvider({ children }: { children: React.ReactNode }) {
   const noteVoiceIdVerdict = useCallback(
     (verdict: {
       allowed: boolean; score: number | null; why: string; active?: boolean; probe?: boolean;
+      stopped?: boolean;
     }) => {
       // The server is the only judge of whether voice ID is on.
       if (typeof verdict.active === 'boolean') voiceIdActiveRef.current = verdict.active;
       setVoiceId((prev) => ({ ...prev, lastScore: verdict.score, lastAllowed: verdict.allowed }));
       if (verdict.probe && probeRef.current.verdict(verdict.allowed)) {
-        // His voice, heard early: Virgil stops now - the server has already stopped the reply
-        // and said so; this also stops audio still queued after the reply finished sending.
-        // From here this stretch is his turn, exactly as when the page cut Virgil off itself.
+        // His voice, heard early: Virgil stops now. When the server stopped a running reply it
+        // has recorded the cut; when the reply had already finished generating and only this
+        // page still plays it, the page tells the server what he heard, so the cut is recorded
+        // exactly once. From here this stretch is his turn, as when the page cut Virgil off.
         console.log('Voice ID: his voice at the start of his speech - interrupting');
         heldBackRef.current = false;
-        interruptRef.current(false);
+        interruptRef.current(VoiceProbe.pageRecordsTheCut(verdict));
         if (isProcessingRef.current) setAiStateRef.current('listening');
       }
     },

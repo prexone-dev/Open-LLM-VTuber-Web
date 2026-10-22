@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { useCamera } from '@/context/camera-context';
 import { useScreenCaptureContext } from '@/context/screen-capture-context';
 import { toaster } from "@/components/ui/toaster";
+import { frameSize } from '@/services/camera-frame';
 import {
   IMAGE_COMPRESSION_QUALITY_KEY,
   DEFAULT_IMAGE_COMPRESSION_QUALITY,
@@ -68,13 +69,7 @@ export function useMediaCapture() {
     try {
       const bitmap = await imageCapture.grabFrame();
       const canvas = document.createElement('canvas');
-      let { width, height } = bitmap;
-
-      const maxWidth = getImageMaxWidth();
-      if (width > maxWidth) {
-        height = (maxWidth / width) * height;
-        width = maxWidth;
-      }
+      const { width, height } = frameSize(bitmap.width, bitmap.height, getImageMaxWidth());
 
       canvas.width = width;
       canvas.height = height;
@@ -84,7 +79,11 @@ export function useMediaCapture() {
         return null;
       }
 
-      ctx.drawImage(bitmap, 0, 0);
+      // Virgil (OLV1-25): drawn AT the canvas's size. Upstream drew the frame at its own
+      // size onto a smaller canvas, so any frame wider than the cap was cropped to its
+      // top-left corner instead of shrunk - a shared screen wider than 1080 pixels
+      // reached the model as its top-left part only.
+      ctx.drawImage(bitmap, 0, 0, width, height);
       const quality = getCompressionQuality();
       return canvas.toDataURL('image/jpeg', quality);
     } catch (error) {

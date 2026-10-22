@@ -11,8 +11,12 @@ import i18n from 'i18next';
 
 export const IMAGE_COMPRESSION_QUALITY_KEY = 'appImageCompressionQuality';
 export const DEFAULT_IMAGE_COMPRESSION_QUALITY = 0.8;
-export const IMAGE_MAX_WIDTH_KEY = 'appImageMaxWidth';
-export const DEFAULT_IMAGE_MAX_WIDTH = 1080;
+// Virgil (OLV1-25): 1920, the camera's full width, not upstream's 1080 - Virgil's server
+// shrinks each picture to what its model reads best, so the page sends it everything.
+// A new key, because every page that ever opened the settings stored upstream's 1080
+// under the old one, and the new default would never reach it.
+export const IMAGE_MAX_WIDTH_KEY = 'appImageMaxWidthV2';
+export const DEFAULT_IMAGE_MAX_WIDTH = 1920;
 
 interface GeneralSettings {
   language: string[]

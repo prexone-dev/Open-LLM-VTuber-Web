@@ -9,6 +9,7 @@ import {
 } from 'react';
 import { useTranslation } from 'react-i18next';
 import { toaster } from '@/components/ui/toaster';
+import { CAMERA_HEIGHT, CAMERA_WIDTH, cameraConstraints } from '@/services/camera-frame';
 
 /**
  * Camera configuration interface
@@ -40,9 +41,11 @@ interface CameraContextState {
 /**
  * Default values and constants
  */
+// Virgil (OLV1-25): a wide HD picture, not upstream's 320x240 - at that size Virgil
+// could not read a photo he held up. See services/camera-frame.ts.
 const DEFAULT_CAMERA_CONFIG: CameraConfig = {
-  width: 320,
-  height: 240,
+  width: CAMERA_WIDTH,
+  height: CAMERA_HEIGHT,
 };
 
 /**
@@ -81,10 +84,7 @@ export function CameraProvider({ children }: { children: ReactNode }) {
       }
 
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          width: { ideal: cameraConfig.width },
-          height: { ideal: cameraConfig.height },
-        },
+        video: cameraConstraints(cameraConfig.width, cameraConfig.height),
       });
 
       streamRef.current = stream;
@@ -126,10 +126,7 @@ export function CameraProvider({ children }: { children: ReactNode }) {
       }
 
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          width: { ideal: cameraConfig.width },
-          height: { ideal: cameraConfig.height },
-        },
+        video: cameraConstraints(cameraConfig.width, cameraConfig.height),
       });
 
       backgroundStreamRef.current = stream;

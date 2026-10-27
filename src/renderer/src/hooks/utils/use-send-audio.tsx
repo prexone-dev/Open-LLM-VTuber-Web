@@ -38,8 +38,30 @@ export function useSendAudio() {
     [sendMessage],
   );
 
+  // Speech the page heard and kept from the server, and why (Virgil, 2026-10-27): he was
+  // not stopping Virgil by talking over it, and the server's log could not say whether he
+  // had been heard at all. Never audio - only how loud it was, the
+  // threshold in force, how long it ran, and whether Virgil was talking.
+  const reportHeldBack = useCallback(
+    (report: {
+      why: string; loudestDb: number; thresholdDb: number | null;
+      virgilTalking: boolean; seconds: number;
+    }) => {
+      sendMessage({
+        type: "speech-held-back",
+        why: report.why,
+        loudest_db: Math.round(report.loudestDb),
+        threshold_db: report.thresholdDb,
+        virgil_talking: report.virgilTalking,
+        seconds: Math.round(report.seconds * 10) / 10,
+      });
+    },
+    [sendMessage],
+  );
+
   return {
     sendAudioPartition,
     sendVoiceProbe,
+    reportHeldBack,
   };
 }

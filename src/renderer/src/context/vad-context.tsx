@@ -12,8 +12,8 @@ import { AiStateContext, AiState } from './ai-state-context';
 import { useLocalStorage } from '@/hooks/utils/use-local-storage';
 import { toaster } from '@/components/ui/toaster';
 import {
-  LoudnessTracker, atRealStart, atSpeechEnd, grewLoudEnough, levelDb, loudEnough,
-  thresholdInForce, VOICE_THRESHOLD_OFF,
+  LoudnessTracker, MIN_GATED_SAMPLES, atRealStart, atSpeechEnd, gatedAudio,
+  grewLoudEnough, levelDb, loudEnough, thresholdInForce, VOICE_THRESHOLD_OFF,
 } from '@/services/voice-gate';
 import { voiceDuck } from '@/services/voice-duck';
 import { addressFor, pageLocation } from '@/services/server-address';
@@ -474,17 +474,23 @@ export function VADProvider({ children }: { children: React.ReactNode }) {
   /**
    * Handle speech end event
    */
-  const handleSpeechEnd = useCallback((audio: Float32Array) => {
+  const handleSpeechEnd = useCallback((whole: Float32Array) => {
     if (!isProcessingRef.current) return;
     console.log('Speech ended');
     probeRef.current.stop();
     const loudest = Math.round(loudnessRef.current.loudest);
     setLastHeardDb(loudest);
+    // Only the sound as loud as the threshold, and a margin round it, is sent: the rest of
+    // the stretch is Virgil's own voice from the speakers (2026-10-28, "its eye candy").
+    const audio = gatedAudio(whole, settingsRef.current.voiceThresholdDb);
+    if (audio.length !== whole.length) {
+      console.log(`Voice threshold cut ${((whole.length - audio.length) / 16000).toFixed(1)} s of quieter sound`);
+    }
     if (atSpeechEnd(
       previousAiStateRef.current === 'thinking-speaking',
       loudnessRef.current.loudest,
       settingsRef.current.voiceThresholdDb,
-    ) === 'drop') {
+    ) === 'drop' || (audio !== whole && audio.length < MIN_GATED_SAMPLES)) {
       // Sound from the speakers, by the voice threshold: never sent, never answered. The
       // page goes back to what it was doing (it may have shown 'listening').
       console.log(`Held back as sound from the speakers: ${loudest} dB`);
@@ -494,7 +500,7 @@ export function VADProvider({ children }: { children: React.ReactNode }) {
         loudestDb: loudnessRef.current.loudest,
         thresholdDb: thresholdInForce(settingsRef.current.voiceThresholdDb),
         virgilTalking: previousAiStateRef.current === 'thinking-speaking',
-        seconds: audio.length / 16000,
+        seconds: whole.length / 16000,
       });
       setPreviousTriggeredProbability(0);
       isProcessingRef.current = false;

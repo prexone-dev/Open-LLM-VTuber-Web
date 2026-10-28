@@ -131,3 +131,55 @@ export function meterStep(previous: number | null, level: number | null): number
   if (previous === null || level >= previous) return level;
   return Math.max(level, previous - METER_FALL_DB_PER_FRAME);
 }
+
+/** Less than this left after gating (0.25 s) is not his speech: held back. */
+export const MIN_GATED_SAMPLES = 4000;
+
+/** The window the audio is gated in: 30 ms at the detector's 16 kHz. */
+export const GATE_WINDOW = 480;
+/**
+ * How much quieter sound is kept either side of a loud window, so the soft start and end
+ * of his words are not clipped: 300 ms.
+ */
+export const GATE_MARGIN_WINDOWS = 10;
+
+/**
+ * The stretch with only what is as loud as the threshold kept, and a margin either side
+ * (Virgil, 2026-10-28). His words: "the threshold you made in the settings 100% is not
+ * gating anything. I watched the sensitivity and what was heard... its eye candy". It was
+ * not: a stretch was sent or dropped whole by its loudest moment, so one loud moment of
+ * his sent every second of Virgil's echo around it to be transcribed - his turn began
+ * with Virgil's own sentence. Now the audio itself is gated: the quiet stretches between
+ * loud ones, longer than twice the margin, are cut out. Off, it is the audio unchanged.
+ */
+export function gatedAudio(audio: Float32Array, thresholdDb: unknown): Float32Array {
+  const threshold = thresholdInForce(thresholdDb);
+  if (threshold === null || !audio || audio.length === 0) return audio;
+  const windows = Math.ceil(audio.length / GATE_WINDOW);
+  const loud: boolean[] = new Array(windows).fill(false);
+  for (let w = 0; w < windows; w += 1) {
+    const start = w * GATE_WINDOW;
+    loud[w] = levelDb(audio.subarray(start, Math.min(audio.length, start + GATE_WINDOW))) >= threshold;
+  }
+  const keep: boolean[] = new Array(windows).fill(false);
+  for (let w = 0; w < windows; w += 1) {
+    if (!loud[w]) continue;
+    const from = Math.max(0, w - GATE_MARGIN_WINDOWS);
+    const to = Math.min(windows - 1, w + GATE_MARGIN_WINDOWS);
+    for (let k = from; k <= to; k += 1) keep[k] = true;
+  }
+  let length = 0;
+  for (let w = 0; w < windows; w += 1) {
+    if (keep[w]) length += Math.min(audio.length, (w + 1) * GATE_WINDOW) - w * GATE_WINDOW;
+  }
+  if (length === audio.length) return audio;
+  const out = new Float32Array(length);
+  let at = 0;
+  for (let w = 0; w < windows; w += 1) {
+    if (!keep[w]) continue;
+    const piece = audio.subarray(w * GATE_WINDOW, Math.min(audio.length, (w + 1) * GATE_WINDOW));
+    out.set(piece, at);
+    at += piece.length;
+  }
+  return out;
+}

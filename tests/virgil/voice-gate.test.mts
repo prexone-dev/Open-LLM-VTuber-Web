@@ -93,3 +93,36 @@ test('the meter rises at once and falls back gently, and shows nothing with the 
   assert.equal(meterStep(-20, -20.5), -20.5);
   assert.equal(meterStep(-30, -30), -30);
 });
+
+// 2026-10-28: "the threshold you made in the settings 100% is not gating anything".
+import { gatedAudio, GATE_WINDOW, MIN_GATED_SAMPLES } from '../../src/renderer/src/services/voice-gate.ts';
+
+function joined(...parts: Float32Array[]): Float32Array {
+  const out = new Float32Array(parts.reduce((n, p) => n + p.length, 0));
+  let at = 0;
+  for (const p of parts) { out.set(p, at); at += p.length; }
+  return out;
+}
+
+test('echo before and after his words is cut out; his words and a margin are kept', () => {
+  const echo = tone(0.02, GATE_WINDOW * 60); // 1.8 s of Virgil from the speakers
+  const him = tone(0.3, GATE_WINDOW * 20); // 0.6 s of him up close
+  const out = gatedAudio(joined(echo, him, echo), THRESHOLD);
+  assert.equal(out.length, GATE_WINDOW * (20 + 2 * 10));
+});
+
+test('a stretch with nothing as loud as the threshold leaves too little to send', () => {
+  assert.ok(gatedAudio(tone(0.02, GATE_WINDOW * 60), THRESHOLD).length < MIN_GATED_SAMPLES);
+});
+
+test('with the threshold off the audio is untouched', () => {
+  const audio = tone(0.02, GATE_WINDOW * 30);
+  assert.equal(gatedAudio(audio, VOICE_THRESHOLD_OFF), audio);
+});
+
+test('a short pause inside his speech is kept', () => {
+  const him = tone(0.3, GATE_WINDOW * 10);
+  const pause = new Float32Array(GATE_WINDOW * 8);
+  const audio = joined(him, pause, him);
+  assert.equal(gatedAudio(audio, THRESHOLD), audio);
+});

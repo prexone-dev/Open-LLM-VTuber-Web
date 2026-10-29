@@ -7,10 +7,13 @@ import { useSubtitle } from '@/context/subtitle-context';
 import { useCamera } from '@/context/camera-context';
 import { useSwitchCharacter } from '@/hooks/utils/use-switch-character';
 import { useConfig } from '@/context/character-config-context';
+import { FRAME_JPEG_QUALITY } from '@/services/camera-frame';
 import i18n from 'i18next';
 
-export const IMAGE_COMPRESSION_QUALITY_KEY = 'appImageCompressionQuality';
-export const DEFAULT_IMAGE_COMPRESSION_QUALITY = 0.8;
+// Virgil (OLV1-25): FRAME_JPEG_QUALITY, not upstream's 0.8 (why: services/camera-frame.ts).
+// A new key, for the reason the width's key below is new.
+export const IMAGE_COMPRESSION_QUALITY_KEY = 'appImageCompressionQualityV2';
+export const DEFAULT_IMAGE_COMPRESSION_QUALITY = FRAME_JPEG_QUALITY;
 // Virgil (OLV1-25): 1920, the camera's full width, not upstream's 1080 - Virgil's server
 // shrinks each picture to what its model reads best, so the page sends it everything.
 // A new key, because every page that ever opened the settings stored upstream's 1080

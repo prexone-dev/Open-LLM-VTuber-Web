@@ -1,6 +1,11 @@
-import { createContext, useContext, useState, ReactNode } from 'react';
+import { createContext, useContext, useRef, useState, ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { toaster } from "@/components/ui/toaster";
+import {
+  electronScreenConstraints,
+  screenShareOptions,
+  whenPictureStops,
+} from '@/services/camera-frame';
 
 interface ScreenCaptureContextType {
   stream: MediaStream | null;
@@ -18,6 +23,9 @@ export function ScreenCaptureProvider({ children }: { children: ReactNode }) {
   const [isStreaming, setIsStreaming] = useState(false);
   const [error, setError] = useState('');
 
+  // Virgil (OLV1-25): stops listening for the browser's own "Stop sharing" (camera-frame.ts).
+  const stopListeningRef = useRef<() => void>(() => {});
+
   const startCapture = async () => {
     try {
       let mediaStream: MediaStream;
@@ -25,30 +33,23 @@ export function ScreenCaptureProvider({ children }: { children: ReactNode }) {
       if (window.electron) {
         const sourceId = await window.electron.ipcRenderer.invoke('get-screen-capture');
 
-        const displayMediaOptions: DisplayMediaStreamOptions = {
-          video: {
-            // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-            // @ts-expect-error
-            mandatory: {
-              chromeMediaSource: "desktop",
-              chromeMediaSourceId: sourceId,
-              minWidth: 1280,
-              maxWidth: 1280,
-              minHeight: 720,
-              maxHeight: 720,
-            },
-          },
+        // Virgil (OLV1-25): the screen's own size up to 4K, not upstream's fixed 1280x720.
+        mediaStream = await navigator.mediaDevices.getUserMedia({
+          video: electronScreenConstraints(sourceId) as MediaTrackConstraints,
           audio: false,
-        };
-
-        mediaStream = await navigator.mediaDevices.getUserMedia(displayMediaOptions);
+        });
       } else {
-        const displayMediaOptions: DisplayMediaStreamOptions = {
-          video: true,
-          audio: false,
-        };
-        mediaStream = await navigator.mediaDevices.getDisplayMedia(displayMediaOptions);
+        mediaStream = await navigator.mediaDevices.getDisplayMedia(screenShareOptions());
       }
+
+      // Virgil (OLV1-25): when he stops sharing from the browser's own bar, the page
+      // stops too, instead of showing the share as on and failing on every turn.
+      stopListeningRef.current();
+      stopListeningRef.current = whenPictureStops(mediaStream, () => {
+        mediaStream.getTracks().forEach((track) => track.stop());
+        setStream((current) => (current === mediaStream ? null : current));
+        setIsStreaming(false);
+      });
 
       setStream(mediaStream);
       setIsStreaming(true);
@@ -65,6 +66,8 @@ export function ScreenCaptureProvider({ children }: { children: ReactNode }) {
   };
 
   const stopCapture = () => {
+    stopListeningRef.current();
+    stopListeningRef.current = () => {};
     if (stream) {
       stream.getTracks().forEach((track) => track.stop());
       setStream(null);

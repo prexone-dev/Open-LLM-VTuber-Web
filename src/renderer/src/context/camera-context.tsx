@@ -9,7 +9,12 @@ import {
 } from 'react';
 import { useTranslation } from 'react-i18next';
 import { toaster } from '@/components/ui/toaster';
-import { CAMERA_HEIGHT, CAMERA_WIDTH, cameraConstraints } from '@/services/camera-frame';
+import {
+  CAMERA_HEIGHT,
+  CAMERA_WIDTH,
+  cameraConstraints,
+  whenPictureStops,
+} from '@/services/camera-frame';
 
 /**
  * Camera configuration interface
@@ -91,6 +96,14 @@ export function CameraProvider({ children }: { children: ReactNode }) {
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
       }
+      // Virgil (OLV1-25): a camera unplugged or taken by another app ends its picture;
+      // the page then shows it off, instead of failing on every turn (camera-frame.ts).
+      whenPictureStops(stream, () => {
+        if (streamRef.current !== stream) return;
+        stream.getTracks().forEach((track) => track.stop());
+        streamRef.current = null;
+        setIsStreaming(false);
+      });
       setIsStreaming(true);
     } catch (err) {
       console.error('Failed to start camera:', err);
@@ -130,6 +143,12 @@ export function CameraProvider({ children }: { children: ReactNode }) {
       });
 
       backgroundStreamRef.current = stream;
+      whenPictureStops(stream, () => {
+        if (backgroundStreamRef.current !== stream) return;
+        stream.getTracks().forEach((track) => track.stop());
+        backgroundStreamRef.current = null;
+        setIsBackgroundStreaming(false);
+      });
       setIsBackgroundStreaming(true);
     } catch (err) {
       console.error('Failed to start background camera:', err);

@@ -6,6 +6,7 @@ import { useTranslation } from 'react-i18next';
 import { MicVAD } from '@ricky0123/vad-web';
 import { useInterrupt } from '@/components/canvas/live2d';
 import { audioTaskQueue } from '@/utils/task-queue';
+import { audioManager } from '@/utils/audio-manager';
 import { useSendAudio } from '@/hooks/utils/use-send-audio';
 import { SubtitleContext } from './subtitle-context';
 import { AiStateContext, AiState } from './ai-state-context';
@@ -13,9 +14,8 @@ import { useLocalStorage } from '@/hooks/utils/use-local-storage';
 import { toaster } from '@/components/ui/toaster';
 import {
   LoudnessTracker, MIN_GATED_SAMPLES, atRealStart, atSpeechEnd, gatedAudio,
-  grewLoudEnough, levelDb, loudEnough, thresholdInForce, VOICE_THRESHOLD_OFF,
+  grewLoudEnough, levelDb, thresholdInForce, VOICE_THRESHOLD_OFF,
 } from '@/services/voice-gate';
-import { voiceDuck } from '@/services/voice-duck';
 import { addressFor, pageLocation } from '@/services/server-address';
 import { joinedSamples, LEARN_SECONDS } from '@/services/voice-id';
 import { VoiceProbe } from '@/services/voice-probe';
@@ -303,10 +303,6 @@ export function VADProvider({ children }: { children: React.ReactNode }) {
       // The server is the only judge of whether voice ID is on.
       if (typeof verdict.active === 'boolean') voiceIdActiveRef.current = verdict.active;
       setVoiceId((prev) => ({ ...prev, lastScore: verdict.score, lastAllowed: verdict.allowed }));
-      // His whole stretch judged: the duck is done either way - not his, Virgil comes back
-      // up; his, the server stops the reply. An early check that says not his leaves it
-      // down: he may still be talking, and his whole stretch decides.
-      if (!verdict.probe) voiceDuck.release();
       if (verdict.probe && probeRef.current.verdict(verdict.allowed)) {
         // His voice, heard early: Virgil stops now. When the server stopped a running reply it
         // has recorded the cut; when the reply had already finished generating and only this
@@ -404,13 +400,10 @@ export function VADProvider({ children }: { children: React.ReactNode }) {
     // While Virgil talks, a sound below the voice threshold is its own voice coming back:
     // it does not cut Virgil off (Virgil, 2026-10-12).
     if (voiceIdActiveRef.current && previousAiStateRef.current === 'thinking-speaking') {
-      // Voice ID decides on the server whether this is him. Until then Virgil is turned down,
-      // not left talking over him (voice-duck.ts, 2026-10-27) - once the speech is as loud
-      // as his threshold says he is; quieter is Virgil's own voice from the speakers.
+      // Voice ID decides on the server whether this is him. Virgil's volume is never
+      // turned down meanwhile: his test of the murmur, 2026-10-30 - Virgil's own loud
+      // sentences crossed the threshold, so it went quiet, came back, and went quiet again.
       heldBackRef.current = true;
-      if (loudEnough(loudnessRef.current.loudest, settingsRef.current.voiceThresholdDb)) {
-        voiceDuck.duck();
-      }
       return;
     }
     const decision = atRealStart(
@@ -447,11 +440,6 @@ export function VADProvider({ children }: { children: React.ReactNode }) {
       if (probe) {
         console.log('Sending the start of his speech for an early voice check');
         sendVoiceProbeRef.current(probe);
-      }
-      // Held back for voice ID and now as loud as he is: turned down while it is checked.
-      if (voiceIdActiveRef.current && heldBackRef.current && !voiceDuck.isDucked
-        && loudEnough(loudnessRef.current.loudest, settingsRef.current.voiceThresholdDb)) {
-        voiceDuck.duck();
       }
       // Held back as an echo but now loud enough to be him: cut Virgil off at once, not
       // when the sentence ends (architecture review, 2026-10-12).
@@ -494,7 +482,6 @@ export function VADProvider({ children }: { children: React.ReactNode }) {
       // Sound from the speakers, by the voice threshold: never sent, never answered. The
       // page goes back to what it was doing (it may have shown 'listening').
       console.log(`Held back as sound from the speakers: ${loudest} dB`);
-      voiceDuck.release();
       reportHeldBackRef.current({
         why: 'below the voice threshold',
         loudestDb: loudnessRef.current.loudest,
@@ -531,6 +518,9 @@ export function VADProvider({ children }: { children: React.ReactNode }) {
       isProcessingRef.current = false;
       return;
     }
+    // His finished turn is the interruption: what is left of the last reply stops now,
+    // since the queue no longer starts a new sentence beside one in flight (OLV1-33).
+    audioManager.stopCurrentAudioAndLipSync();
     audioTaskQueue.clearQueue();
 
     if (autoStopMicRef.current) {
@@ -552,7 +542,6 @@ export function VADProvider({ children }: { children: React.ReactNode }) {
     if (!isProcessingRef.current) return;
     console.log('VAD misfire detected');
     probeRef.current.stop();
-    voiceDuck.release();
     reportHeldBackRef.current({
       why: 'too short to be speech (a misfire)',
       loudestDb: loudnessRef.current.loudest,

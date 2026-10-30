@@ -1,5 +1,3 @@
-import { voiceDuck } from '../services/voice-duck';
-
 /**
  * Global audio manager for handling audio playback and interruption
  * This ensures all components share the same audio reference
@@ -8,14 +6,17 @@ class AudioManager {
   private currentAudio: HTMLAudioElement | null = null;
   private currentModel: any | null = null;
 
+  private onStop: (() => void) | null = null;
+
   /**
-   * Set the current playing audio
+   * Set the current playing audio. `onStop` ends the sentence's task when it is stopped
+   * (Virgil, OLV1-33): the queue waits for the sentence in flight, so a stop must end it
+   * here rather than rely on the browser firing `error` for the emptied source.
    */
-  setCurrentAudio(audio: HTMLAudioElement, model: any) {
+  setCurrentAudio(audio: HTMLAudioElement, model: any, onStop: (() => void) | null = null) {
     this.currentAudio = audio;
     this.currentModel = model;
-    // A sentence that starts while he is being checked starts turned down (voice-duck.ts).
-    voiceDuck.playing(audio);
+    this.onStop = onStop;
   }
 
   /**
@@ -30,6 +31,9 @@ class AudioManager {
       audio.pause();
       audio.src = '';
       audio.load();
+      const ended = this.onStop;
+      this.onStop = null;
+      ended?.();
 
       // Stop Live2D lip sync
       const model = this.currentModel;
@@ -59,10 +63,6 @@ class AudioManager {
     } else {
       console.log('[AudioManager] No current audio playing to stop.');
     }
-    // Always, not only with a sentence playing: stopped between two sentences, or after
-    // the last one ended by itself, the duck must not carry into the reply to his turn
-    // (architecture review, 2026-10-27).
-    voiceDuck.stopped();
   }
 
   /**
@@ -72,7 +72,7 @@ class AudioManager {
     if (this.currentAudio === audio) {
       this.currentAudio = null;
       this.currentModel = null;
-      voiceDuck.playing(null);
+      this.onStop = null;
     }
   }
 

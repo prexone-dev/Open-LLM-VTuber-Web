@@ -80,6 +80,8 @@ function WebSocketHandler({ children }: { children: React.ReactNode }) {
         break;
       case 'conversation-chain-start':
         setAiState('thinking-speaking');
+        // Drops what waits; a sentence still playing finishes first (OLV1-33) - only an
+        // interruption cuts it off.
         audioTaskQueue.clearQueue();
         clearResponse();
         break;

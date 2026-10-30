@@ -151,7 +151,9 @@ export const useAudioTask = () => {
         const audio = new Audio(audioDataUrl);
 
         // Register with global audio manager IMMEDIATELY after creating audio
-        audioManager.setCurrentAudio(audio, model);
+        // A stop ends this sentence's task at once (cleanup is defined below and runs once).
+        // eslint-disable-next-line @typescript-eslint/no-use-before-define
+        audioManager.setCurrentAudio(audio, model, () => cleanup());
         let isFinished = false;
         let started = false;
         let heldToken: number | null = null;

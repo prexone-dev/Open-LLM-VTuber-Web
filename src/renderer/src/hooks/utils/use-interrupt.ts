@@ -14,7 +14,16 @@ export const useInterrupt = () => {
   const { stopCurrentAudioAndLipSync } = useAudioTask();
 
   const interrupt = (sendSignal = true) => {
-    if (aiState !== 'thinking-speaking') return;
+    if (aiState !== 'thinking-speaking') {
+      // Virgil (OLV1-33): the queue now waits for the sentence in flight, so a sentence
+      // still playing (or held for a click) while the state reads otherwise is stopped
+      // here too, or it would hold everything behind it.
+      if (audioTaskQueue.hasTask()) {
+        stopCurrentAudioAndLipSync();
+        audioTaskQueue.clearQueue();
+      }
+      return;
+    }
     console.log('Interrupting conversation chain');
 
     stopCurrentAudioAndLipSync();

@@ -1,18 +1,38 @@
 /* eslint-disable no-promise-executor-return */
 /* eslint-disable arrow-parens */
+
+/** Whether the page is out of sight - another tab, or the window minimised. */
+const pageHidden = () => typeof document !== 'undefined' && document.hidden;
+
+/**
+ * Runs tasks one at a time, in order.
+ *
+ * Virgil (OLV1-33, 2026-10-30), his report: away from the tab Virgil said nothing, and
+ * back on it everything it had meant to say came out at once, speaking over itself.
+ * Two things in the old queue did that, and both are changed here:
+ * - `clearQueue` marked the queue idle while a task was still running, so the next
+ *   task started beside it. A sentence that cannot finish while the tab is hidden
+ *   stayed running, and every new turn added another player beside it, all of which
+ *   played when the tab came back. Now clearing drops only what is waiting; the task
+ *   in flight runs to its end (an interruption stops its sound first, which ends it).
+ * - The gap between tasks and `waitForCompletion` were timers, which a hidden tab
+ *   slows to once a second, and Chrome to once a minute after five minutes. Now the
+ *   gap is skipped while the page is hidden and the end is told, not polled.
+ */
 export class TaskQueue {
   private queue: (() => Promise<void>)[] = [];
 
-  private running = false;
+  private current: Promise<void> | null = null;
 
   private taskInterval: number;
 
-  private pendingComplete = false;
+  private hidden: () => boolean;
 
-  private activeTasks = new Set<Promise<void>>();
+  private idle: (() => void)[] = [];
 
-  constructor(taskIntervalMs = 3000) {
+  constructor(taskIntervalMs = 3000, hidden: () => boolean = pageHidden) {
     this.taskInterval = taskIntervalMs;
+    this.hidden = hidden;
   }
 
   addTask(task: () => Promise<void>) {
@@ -20,56 +40,52 @@ export class TaskQueue {
     this.runNextTask();
   }
 
+  /** Drop every task still waiting. The one in flight, if any, runs to its end. */
   clearQueue() {
     this.queue = [];
-    this.activeTasks.clear();
-    this.running = false;
   }
 
-  private async runNextTask() {
-    if (this.running || this.queue.length === 0) {
-      if (this.queue.length === 0 && this.activeTasks.size === 0 && this.pendingComplete) {
-        this.pendingComplete = false;
-        await new Promise(resolve => setTimeout(resolve, this.taskInterval));
-      }
+  private gap(): Promise<void> {
+    if (this.taskInterval <= 0 || this.hidden()) return Promise.resolve();
+    return new Promise(resolve => setTimeout(resolve, this.taskInterval));
+  }
+
+  private runNextTask() {
+    if (this.current) return;
+    const task = this.queue.shift();
+    if (!task) {
+      this.settle();
       return;
     }
-
-    this.running = true;
-    const task = this.queue.shift();
-    if (task) {
-      const taskPromise = task();
-      this.activeTasks.add(taskPromise);
-
+    const run = (async () => {
       try {
-        await taskPromise;
-        await new Promise(resolve => setTimeout(resolve, this.taskInterval));
+        await task();
+        await this.gap();
       } catch (error) {
         console.error('Task Queue Error', error);
-      } finally {
-        this.activeTasks.delete(taskPromise);
-        this.running = false;
-        this.runNextTask();
       }
-    }
+    })();
+    this.current = run;
+    run.then(() => {
+      this.current = null;
+      this.runNextTask();
+    });
+  }
+
+  private settle() {
+    const waiting = this.idle;
+    this.idle = [];
+    waiting.forEach(resolve => resolve());
   }
 
   public hasTask(): boolean {
-    return this.queue.length > 0 || this.activeTasks.size > 0 || this.running;
+    return this.queue.length > 0 || this.current !== null;
   }
 
+  /** Resolves once nothing is running or waiting. */
   public waitForCompletion(): Promise<void> {
-    this.pendingComplete = true;
-    return new Promise((resolve) => {
-      const check = () => {
-        if (!this.hasTask()) {
-          resolve();
-        } else {
-          setTimeout(check, 100);
-        }
-      };
-      check();
-    });
+    if (!this.hasTask()) return Promise.resolve();
+    return new Promise((resolve) => { this.idle.push(resolve); });
   }
 }
 

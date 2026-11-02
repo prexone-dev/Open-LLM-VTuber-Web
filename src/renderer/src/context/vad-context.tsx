@@ -193,7 +193,9 @@ export function VADProvider({ children }: { children: React.ReactNode }) {
 
   // External hooks and contexts
   const { interrupt } = useInterrupt();
-  const { sendAudioPartition, sendVoiceProbe, reportHeldBack } = useSendAudio();
+  const {
+    sendAudioPartition, sendVoiceProbe, reportHeldBack, sendSpeechStart,
+  } = useSendAudio();
   const { setSubtitleText } = useContext(SubtitleContext)!;
   const { aiState, setAiState } = useContext(AiStateContext)!;
 
@@ -202,6 +204,7 @@ export function VADProvider({ children }: { children: React.ReactNode }) {
   const sendAudioPartitionRef = useRef(sendAudioPartition);
   const sendVoiceProbeRef = useRef(sendVoiceProbe);
   const reportHeldBackRef = useRef(reportHeldBack);
+  const sendSpeechStartRef = useRef(sendSpeechStart);
   const aiStateRef = useRef<AiState>(aiState);
   const setSubtitleTextRef = useRef(setSubtitleText);
   const setAiStateRef = useRef(setAiState);
@@ -344,7 +347,8 @@ export function VADProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     sendVoiceProbeRef.current = sendVoiceProbe;
     reportHeldBackRef.current = reportHeldBack;
-  }, [sendVoiceProbe, reportHeldBack]);
+    sendSpeechStartRef.current = sendSpeechStart;
+  }, [sendVoiceProbe, reportHeldBack, sendSpeechStart]);
 
   useEffect(() => {
     setSubtitleTextRef.current = setSubtitleText;
@@ -421,6 +425,9 @@ export function VADProvider({ children }: { children: React.ReactNode }) {
       console.log('Interrupting AI speech due to user speaking');
       interruptRef.current();
     }
+    // His speech has started: a sentence of his held as unfinished waits for the rest
+    // (Virgil OLV1-34). Not sent for Virgil's own voice coming back - held above.
+    sendSpeechStartRef.current();
     // Now change to listening state
     setAiStateRef.current('listening');
   }, []);

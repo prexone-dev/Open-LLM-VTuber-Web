@@ -59,9 +59,17 @@ export function useSendAudio() {
     [sendMessage],
   );
 
+  // His speech has started (Virgil OLV1-34, 2026-11-01): a sentence of his the server holds
+  // as unfinished waits while he says the rest, instead of being answered alone. Never
+  // audio, never a turn, never a stop.
+  const sendSpeechStart = useCallback(() => {
+    sendMessage({ type: "speech-start" });
+  }, [sendMessage]);
+
   return {
     sendAudioPartition,
     sendVoiceProbe,
     reportHeldBack,
+    sendSpeechStart,
   };
 }

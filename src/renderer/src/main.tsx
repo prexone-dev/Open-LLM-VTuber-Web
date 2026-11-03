@@ -3,6 +3,7 @@ import './index.css';
 import App from './App';
 import { LAppAdapter } from '../WebSDK/src/lappadapter';
 import './i18n';
+import { audioPrime } from './services/audio-prime';
 
 const originalConsoleWarn = console.warn;
 console.warn = (...args) => {
@@ -27,6 +28,9 @@ console.error = (...args: any[]) => {
 };
 
 if (typeof window !== 'undefined') {
+  // Virgil (OLV1-33): one silent clip as early as allowed, so a hidden tab
+  // can still start a sentence (services/audio-prime.ts).
+  audioPrime.start();
   (window as any).getLAppAdapter = () => LAppAdapter.getInstance();
 
   // Dynamically load the Live2D Core script

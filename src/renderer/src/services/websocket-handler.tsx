@@ -22,6 +22,7 @@ import { useGroup } from '@/context/group-context';
 import { useInterrupt } from '@/hooks/utils/use-interrupt';
 import { useBrowser } from '@/context/browser-context';
 import { lacksModel } from '@/services/reconnect';
+import { hiddenPlay } from '@/services/hidden-play';
 import { pageLocation, usableFromHere } from '@/services/server-address';
 
 /** How many sessions in a row may come up without a model before the page stops leaving them. */
@@ -84,6 +85,8 @@ function WebSocketHandler({ children }: { children: React.ReactNode }) {
         // interruption cuts it off.
         audioTaskQueue.clearQueue();
         clearResponse();
+        // A turn he cut off never sends its count; each turn counts from its own start.
+        hiddenPlay.startTurn();
         break;
       case 'conversation-chain-end':
         audioTaskQueue.addTask(() => new Promise<void>((resolve) => {

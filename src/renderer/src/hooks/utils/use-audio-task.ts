@@ -9,6 +9,7 @@ import { useChatHistory } from '@/context/chat-history-context';
 import { audioTaskQueue } from '@/utils/task-queue';
 import { audioManager } from '@/utils/audio-manager';
 import { playOrHold, voiceUnlock } from '@/services/voice-unlock';
+import { hiddenPlay } from '@/services/hidden-play';
 import { toaster } from '@/components/ui/toaster';
 import { useWebSocket } from '@/context/websocket-context';
 import { DisplayText } from '@/services/websocket-service';
@@ -218,6 +219,7 @@ export const useAudioTask = () => {
           playOrHold(() => audio.play(), voiceUnlock, {
             onPlaying: () => {
               heldToken = null;
+              hiddenPlay.noteStarted();
               startLipSync();
             },
             onHeld: (token) => { heldToken = token; },
@@ -268,7 +270,8 @@ export const useAudioTask = () => {
       await audioTaskQueue.waitForCompletion();
       if (isMounted && backendSynthComplete) {
         stopCurrentAudioAndLipSync();
-        sendMessage({ type: "frontend-playback-complete" });
+        // Virgil (OLV1-33): counts only - how much was said while his tab was hidden.
+        sendMessage({ type: "frontend-playback-complete", hidden_tab: hiddenPlay.take() });
         setBackendSynthComplete(false);
       }
     };

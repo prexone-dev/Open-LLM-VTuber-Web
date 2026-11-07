@@ -47,7 +47,7 @@ function WebSocketHandler({ children }: { children: React.ReactNode }) {
   const [pendingModelInfo, setPendingModelInfo] = useState<ModelInfo | undefined>(undefined);
   const { setSelfUid, setGroupMembers, setIsOwner } = useGroup();
   const {
-    startMic, stopMic, autoStartMicOnConvEnd, noteVoiceIdVerdict,
+    startMic, stopMic, autoStartMicOnConvEnd, noteVoiceIdVerdict, noteVoiceProbeDone,
   } = useVAD();
   const autoStartMicOnConvEndRef = useRef(autoStartMicOnConvEnd);
   const { interrupt } = useInterrupt();
@@ -304,6 +304,10 @@ function WebSocketHandler({ children }: { children: React.ReactNode }) {
             ? (message as { stopped?: boolean }).stopped
             : undefined,
         });
+        break;
+      case 'voice-probe-done':
+        // An early voice check that was not his is answered: the next may go (Virgil, 2026-11-06).
+        noteVoiceProbeDone();
         break;
       case 'interrupt-signal':
         // Handle forwarded interrupt

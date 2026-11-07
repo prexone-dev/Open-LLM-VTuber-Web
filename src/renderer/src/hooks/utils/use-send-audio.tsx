@@ -32,8 +32,9 @@ export function useSendAudio() {
   // early and stop Virgil at once (Virgil, 2026-10-13). Never a turn: the whole stretch
   // still goes by sendAudioPartition when he stops.
   const sendVoiceProbe = useCallback(
-    (audio: Float32Array) => {
-      sendMessage({ type: "voice-probe", audio: Array.from(audio) });
+    (audio: Float32Array, again = false) => {
+      // `again`: a check after the first of one stretch (Virgil, 2026-11-06).
+      sendMessage({ type: "voice-probe", audio: Array.from(audio), ...(again ? { again: true } : {}) });
     },
     [sendMessage],
   );

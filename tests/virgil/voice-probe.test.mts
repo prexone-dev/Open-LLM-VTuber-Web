@@ -3,7 +3,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  PROBE_SAMPLES, PROBE_SAMPLE_RATE, PROBE_SECONDS, VoiceProbe,
+  PROBE_AGAIN_SAMPLES, PROBE_ANSWER_LOST_SAMPLES, PROBE_MAX_AGAIN, PROBE_SAMPLES,
+  PROBE_SAMPLE_RATE, PROBE_SECONDS, PROBE_WINDOW_SAMPLES, VoiceProbe,
 } from '../../src/renderer/src/services/voice-probe.ts';
 
 /** The speech detector's frame: 512 samples, 32 ms. */
@@ -13,13 +14,15 @@ function frame(value: number): Float32Array {
   return new Float32Array(FRAME).fill(value);
 }
 
-/** Feed frames until the probe gives something back; how many frames that took. */
+/** Feed frames until the probe gives a check back; how many frames that took, the samples and
+ * whether it was a later check. The server's answer to any check before is taken as given. */
 function feedUntilSent(probe: VoiceProbe, loudEnough = () => true, limit = 500) {
+  probe.answered();
   for (let n = 1; n <= limit; n += 1) {
-    const out = probe.add(frame(n), loudEnough());
-    if (out) return { frames: n, out };
+    const check = probe.add(frame(n), loudEnough());
+    if (check) return { frames: n, out: check.samples, again: check.again };
   }
-  return { frames: -1, out: null };
+  return { frames: -1, out: null, again: false };
 }
 
 test('the probe is a little over the server minimum of one second', () => {
@@ -27,10 +30,10 @@ test('the probe is a little over the server minimum of one second', () => {
   assert.equal(PROBE_SAMPLES, Math.round(PROBE_SECONDS * PROBE_SAMPLE_RATE));
 });
 
-test('sent once, as soon as 1.2 s of speech is gathered - not at the end of the sentence', () => {
+test('the first check goes as soon as 1.2 s of speech is gathered - not at the end of the sentence', () => {
   const probe = new VoiceProbe();
   probe.start(true);
-  const { frames, out } = feedUntilSent(probe);
+  const { frames, out, again } = feedUntilSent(probe);
   assert.equal(frames, Math.ceil(PROBE_SAMPLES / FRAME));
   assert.equal(out!.length, PROBE_SAMPLES);
   // The first moments, in order.
@@ -38,8 +41,100 @@ test('sent once, as soon as 1.2 s of speech is gathered - not at the end of the 
   assert.equal(out![FRAME], 2);
   const seconds = (frames * FRAME) / PROBE_SAMPLE_RATE;
   assert.ok(seconds < 1.25, `sent after ${seconds} s of speech`);
-  // Never twice for one stretch.
-  for (let n = 0; n < 100; n += 1) assert.equal(probe.add(frame(9)), null);
+  assert.equal(again, false);
+});
+
+// 2026-11-06: "It won't recognize while I'm still talking. It waits for me to finish my
+// sentence." The first second, mixed with Virgil's voice, scored closer to Virgil, and nothing
+// looked again until his whole sentence arrived.
+test('while he keeps talking and is not confirmed, the latest speech is checked again each second', () => {
+  const probe = new VoiceProbe();
+  probe.start(true);
+  const first = feedUntilSent(probe);
+  const second = feedUntilSent(probe);
+  assert.equal(second.frames, Math.ceil(PROBE_AGAIN_SAMPLES / FRAME));
+  assert.equal(second.again, true);
+  // Everything heard so far (under 3 s), in order, ending with the newest frame.
+  const heard = first.frames + second.frames;
+  assert.equal(second.out!.length, heard * FRAME);
+  assert.equal(second.out![0], 1);
+  assert.equal(second.out![second.out!.length - 1], second.frames);
+  // Later on, only the latest 3 s.
+  let late = feedUntilSent(probe);
+  for (let n = 0; n < 3; n += 1) late = feedUntilSent(probe);
+  assert.ok(late.out!.length <= PROBE_WINDOW_SAMPLES + FRAME);
+  assert.ok(late.out!.length >= PROBE_WINDOW_SAMPLES);
+  assert.equal(late.out![late.out!.length - 1], late.frames);
+});
+
+test('once his voice is confirmed, nothing more is sent for the stretch', () => {
+  const probe = new VoiceProbe();
+  probe.start(true);
+  feedUntilSent(probe);
+  assert.equal(probe.verdict(true), true);
+  assert.equal(feedUntilSent(probe).out, null);
+});
+
+test('a check after the first still waits for speech loud enough to be him', () => {
+  const probe = new VoiceProbe();
+  probe.start(true);
+  feedUntilSent(probe);
+  assert.equal(feedUntilSent(probe, () => false, 200).out, null);
+  assert.equal(probe.add(frame(5), true)?.again, true);
+});
+
+// Architecture review, 2026-11-06: the server takes one message at a time, so checks sent
+// faster than it answers would queue up ahead of his turn.
+test('a later check waits for the answer to the last', () => {
+  const probe = new VoiceProbe();
+  probe.start(true);
+  feedUntilSent(probe);
+  // No answer: nothing more until the answer is long overdue.
+  let frames = 0;
+  let check = null;
+  while (!check && frames < 500) {
+    frames += 1;
+    check = probe.add(frame(frames), true);
+  }
+  assert.equal(frames, Math.ceil(PROBE_ANSWER_LOST_SAMPLES / FRAME));
+  // Answered: the next goes as soon as he has said a second more.
+  const next = feedUntilSent(probe);
+  assert.equal(next.frames, Math.ceil(PROBE_AGAIN_SAMPLES / FRAME));
+  // An answer that comes once a second is due lets the next go on the next frame.
+  for (let n = 0; n < Math.ceil(PROBE_AGAIN_SAMPLES / FRAME) + 5; n += 1) {
+    assert.equal(probe.add(frame(1), true), null);
+  }
+  probe.answered();
+  assert.equal(probe.add(frame(1), true)?.again, true);
+});
+
+test('his voice confirmed counts as the answer too', () => {
+  const probe = new VoiceProbe();
+  probe.start(true);
+  feedUntilSent(probe);
+  assert.equal(probe.awaiting, true);
+  probe.verdict(false);
+  assert.equal(probe.awaiting, false);
+});
+
+test('a stretch is checked again at most ten more times - past that it is not him cutting in', () => {
+  const probe = new VoiceProbe();
+  probe.start(true);
+  feedUntilSent(probe);
+  for (let n = 0; n < PROBE_MAX_AGAIN; n += 1) assert.equal(feedUntilSent(probe).again, true);
+  assert.equal(feedUntilSent(probe).out, null);
+});
+
+test('a new stretch starts again from its own first check', () => {
+  const probe = new VoiceProbe();
+  probe.start(true);
+  feedUntilSent(probe);
+  feedUntilSent(probe);
+  probe.start(true);
+  const { frames, out, again } = feedUntilSent(probe);
+  assert.equal(frames, Math.ceil(PROBE_SAMPLES / FRAME));
+  assert.equal(out!.length, PROBE_SAMPLES);
+  assert.equal(again, false);
 });
 
 test('not armed - voice ID off or Virgil quiet - nothing is ever sent', () => {
@@ -54,7 +149,7 @@ test('below the voice threshold it waits, and goes the moment the speech is loud
   let loud = false;
   assert.equal(feedUntilSent(probe, () => loud, 100).out, null);
   loud = true;
-  const out = probe.add(frame(7), true);
+  const out = probe.add(frame(7), true)?.samples;
   assert.ok(out);
   // What is sent is still the first moments, not the latest frame.
   assert.equal(out![0], 1);
@@ -100,7 +195,7 @@ test('frames are copied - a detector that reuses its buffer does not change what
   let out: Float32Array | null = null;
   for (let n = 1; !out && n < 100; n += 1) {
     shared.fill(n);
-    out = probe.add(shared, true);
+    out = probe.add(shared, true)?.samples ?? null;
   }
   assert.equal(out![0], 1);
 });

@@ -115,6 +115,9 @@ interface VADState {
     allowed: boolean; score: number | null; why: string; active?: boolean; probe?: boolean;
     stopped?: boolean;
   }) => void;
+
+  /** The server answered an early voice check that was not his (`voice-probe-done`). */
+  noteVoiceProbeDone: () => void;
 }
 
 export interface VoiceIdState {
@@ -319,6 +322,8 @@ export function VADProvider({ children }: { children: React.ReactNode }) {
     },
     [],
   );
+  // Not his, or not judged: the next check of the stretch may go (2026-11-06).
+  const noteVoiceProbeDone = useCallback(() => probeRef.current.answered(), []);
   // Every frame's level, for the live meter (Virgil, 2026-10-12: "a reactive sound
   // threshold bar like discord has"). A ref, not state: frames arrive ~30 times a second.
   const liveLevelRef = useRef<{ db: number; at: number } | null>(null);
@@ -439,14 +444,16 @@ export function VADProvider({ children }: { children: React.ReactNode }) {
     if (frame) liveLevelRef.current = { db: levelDb(frame), at: performance.now() };
     if (isProcessingRef.current && frame) {
       loudnessRef.current.add(frame);
-      const probe = probeRef.current.add(frame, atSpeechEnd(
+      const check = probeRef.current.add(frame, atSpeechEnd(
         true,
         loudnessRef.current.loudest,
         settingsRef.current.voiceThresholdDb,
       ) === 'send');
-      if (probe) {
-        console.log('Sending the start of his speech for an early voice check');
-        sendVoiceProbeRef.current(probe);
+      if (check) {
+        console.log(check.again
+          ? 'Sending the latest of his speech for another voice check'
+          : 'Sending the start of his speech for an early voice check');
+        sendVoiceProbeRef.current(check.samples, check.again);
       }
       // Held back as an echo but now loud enough to be him: cut Virgil off at once, not
       // when the sentence ends (architecture review, 2026-10-12).
@@ -714,6 +721,7 @@ export function VADProvider({ children }: { children: React.ReactNode }) {
       startLearningVoice,
       cancelLearningVoice,
       noteVoiceIdVerdict,
+      noteVoiceProbeDone,
     }),
     [
       autoStopMic,
@@ -731,6 +739,7 @@ export function VADProvider({ children }: { children: React.ReactNode }) {
       startLearningVoice,
       cancelLearningVoice,
       noteVoiceIdVerdict,
+      noteVoiceProbeDone,
     ],
   );
 

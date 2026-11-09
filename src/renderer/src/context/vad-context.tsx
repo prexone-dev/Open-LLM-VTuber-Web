@@ -20,6 +20,10 @@ import { addressFor, pageLocation } from '@/services/server-address';
 import { joinedSamples, LEARN_SECONDS } from '@/services/voice-id';
 import { VoiceProbe } from '@/services/voice-probe';
 
+/** Frames of 32 ms the VAD must hear as speech before it is speech: 4 is 128 ms, one
+ * short word ("stop"). See initVAD. */
+export const MIN_SPEECH_FRAMES = 4;
+
 /**
  * VAD settings configuration interface
  * @interface VADSettings
@@ -603,6 +607,12 @@ export function VADProvider({ children }: { children: React.ReactNode }) {
       positiveSpeechThreshold: settings.positiveSpeechThreshold / 100,
       negativeSpeechThreshold: settings.negativeSpeechThreshold / 100,
       redemptionFrames: settings.redemptionFrames,
+      // His one word counts (Virgil OLV1-35). The library's v5 default is 9 frames of
+      // speech (288 ms); 2026-11-09 13:55:59-13:56:03 he said "stop" three times at -12 to
+      // -11 dB, well over the voice threshold, and each was dropped as "too short to be
+      // speech (a misfire)" while Virgil talked on. Whether it is him is still the voice
+      // threshold's and voice ID's to say, after this.
+      minSpeechFrames: MIN_SPEECH_FRAMES,
       baseAssetPath: './libs/',
       onnxWASMBasePath: './libs/',
       onSpeechStart: handleSpeechStart,

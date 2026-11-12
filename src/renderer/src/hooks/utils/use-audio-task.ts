@@ -158,6 +158,19 @@ export const useAudioTask = () => {
         let isFinished = false;
         let started = false;
         let heldToken: number | null = null;
+        let counted = false;
+        // A sentence refused again on his click's retry is re-held, not held twice.
+        let heldCounted = false;
+
+        // Counted once, from whichever comes first: the play() promise or the
+        // element's own `playing` event. Safari in a hidden tab played without the
+        // promise being counted (OLV1-33, 2026-11-12).
+        const countStarted = () => {
+          if (counted) return;
+          counted = true;
+          hiddenPlay.noteStarted();
+        };
+        audio.addEventListener('playing', countStarted);
 
         const cleanup = () => {
           audioManager.clearCurrentAudio(audio);
@@ -219,10 +232,16 @@ export const useAudioTask = () => {
           playOrHold(() => audio.play(), voiceUnlock, {
             onPlaying: () => {
               heldToken = null;
-              hiddenPlay.noteStarted();
+              countStarted();
               startLipSync();
             },
-            onHeld: (token) => { heldToken = token; },
+            onHeld: (token) => {
+              heldToken = token;
+              if (!heldCounted) {
+                heldCounted = true;
+                hiddenPlay.noteHeld();
+              }
+            },
             stillWanted,
             onDropped: cleanup,
             onFailed: (err) => {
@@ -239,6 +258,8 @@ export const useAudioTask = () => {
 
         audio.addEventListener('ended', () => {
           console.log("Audio playback completed");
+          countStarted();
+          hiddenPlay.noteFinished();
           cleanup();
         });
 

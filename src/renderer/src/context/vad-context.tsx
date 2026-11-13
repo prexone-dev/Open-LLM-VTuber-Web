@@ -19,6 +19,7 @@ import {
 import { addressFor, pageLocation } from '@/services/server-address';
 import { joinedSamples, LEARN_SECONDS } from '@/services/voice-id';
 import { VoiceProbe } from '@/services/voice-probe';
+import { micReport } from '@/services/mic-report';
 
 /** Frames of 32 ms the VAD must hear as speech before it is speech: 4 is 128 ms, one
  * short word ("stop"). See initVAD. */
@@ -201,7 +202,7 @@ export function VADProvider({ children }: { children: React.ReactNode }) {
   // External hooks and contexts
   const { interrupt } = useInterrupt();
   const {
-    sendAudioPartition, sendVoiceProbe, reportHeldBack, sendSpeechStart,
+    sendAudioPartition, sendVoiceProbe, reportHeldBack, sendSpeechStart, reportMic,
   } = useSendAudio();
   const { setSubtitleText } = useContext(SubtitleContext)!;
   const { aiState, setAiState } = useContext(AiStateContext)!;
@@ -628,6 +629,10 @@ export function VADProvider({ children }: { children: React.ReactNode }) {
     }
     vadRef.current = newVAD;
     newVAD.start();
+    // What the browser actually applied to the microphone, for the server's log (OLV7-16).
+    // (The library keeps its stream private; it is the one it opened, read only.)
+    const micStream = (newVAD as unknown as { stream?: MediaStream }).stream;
+    reportMic(micReport(micStream?.getAudioTracks?.()[0], navigator.userAgent));
     return true;
   };
 

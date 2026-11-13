@@ -1,6 +1,7 @@
 import { useCallback } from "react";
 import { useWebSocket } from "@/context/websocket-context";
 import { useMediaCapture } from "@/hooks/utils/use-media-capture";
+import type { MicReport } from "@/services/mic-report";
 
 export function useSendAudio() {
   const { sendMessage } = useWebSocket();
@@ -67,10 +68,17 @@ export function useSendAudio() {
     sendMessage({ type: "speech-start" });
   }, [sendMessage]);
 
+  // What the browser did to his microphone (Virgil OLV7-16, 2026-11-13): sent once each
+  // time the microphone starts. Switches and numbers only (services/mic-report.ts).
+  const reportMic = useCallback((report: MicReport | null) => {
+    if (report) sendMessage(report);
+  }, [sendMessage]);
+
   return {
     sendAudioPartition,
     sendVoiceProbe,
     reportHeldBack,
     sendSpeechStart,
+    reportMic,
   };
 }
